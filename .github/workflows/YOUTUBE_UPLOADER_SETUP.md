@@ -54,7 +54,7 @@ gh run watch
 3. **(Optional)** Generate test export bundle via `create_test_bundle.py`
 4. **Verify** bundle structure (video file, metadata.json)
 5. **Create** `client_secrets.json` from GitHub secret
-6. **(Optional)** Pre-create `youtube_token.json` if refresh token is available (headless)
+6. **(Optional)** Pre-create `.youtube-token.json` if refresh token is available (headless), or set YOUTUBE_TOKEN_PATH to a custom path.
 7. **Run** uploader: `python tools/publish/youtube_uploader.py ...`
 8. **Clean up** sensitive files
 9. **Post job summary** with upload results
@@ -63,7 +63,7 @@ gh run watch
 
 For fully automated uploads without browser interaction:
 
-1. Run the uploader locally once to generate `youtube_token.json`:
+1. Run the uploader locally once to generate `.youtube-token.json` (or a local token file):
    ```bash
    python tools/publish/youtube_uploader.py \
      --export-path exports/test-project \
@@ -71,9 +71,9 @@ For fully automated uploads without browser interaction:
    # Follow browser prompt to authorize
    ```
 
-2. Extract and save the `refresh_token` from `youtube_token.json`:
+2. Extract and save the `refresh_token` from `.youtube-token.json` (or your local token file):
    ```bash
-   cat youtube_token.json | jq -r .refresh_token
+   cat .youtube-token.json | jq -r .refresh_token
    ```
 
 3. Add this token as GitHub secret `YOUTUBE_REFRESH_TOKEN`
@@ -95,7 +95,7 @@ For fully automated uploads without browser interaction:
 **"OAuth browser flow not available"**
 - This is expected in headless environments
 - Set up `YOUTUBE_REFRESH_TOKEN` secret (see Headless setup above)
-- Or run the uploader locally once to generate `youtube_token.json`, then copy it to the workflow
+- Or run the uploader locally once to generate `.youtube-token.json`, then copy it to the workflow (or set YOUTUBE_TOKEN_PATH)
 
 **"403 Unauthorized"**
 - Verify your Google OAuth credentials are valid

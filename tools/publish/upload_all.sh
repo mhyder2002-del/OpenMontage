@@ -14,7 +14,7 @@ fi
 for d in exports/*/ ; do
   [ -d "$d" ] || continue
   echo "Uploading export: $d"
-  $PYTHON tools/publish/youtube_uploader.py --export-path "$d" --client-secrets "$CLIENT_SECRETS" || echo "Upload failed for $d"
+  "$PYTHON" tools/publish/youtube_uploader.py --export-path "$d" --client-secrets "$CLIENT_SECRETS" || echo "Upload failed for $d"
 done
 
-echo "Done." 
+echo "Done."

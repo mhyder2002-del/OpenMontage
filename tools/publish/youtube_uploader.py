@@ -5,8 +5,8 @@ Usage:
     --client-secrets client_secrets.json
 
 The script performs an OAuth2 installed-app flow (opens browser), caches credentials
-in youtube_token.json, reads metadata from the export bundle (metadata/metadata.json),
-and uploads the video with metadata and optional thumbnail.
+in .youtube-token.json (not committed), reads metadata from the export bundle
+(metadata/metadata.json), and uploads the video with metadata and optional thumbnail.
 
 Dependencies (added to requirements.txt):
   google-api-python-client, google-auth-oauthlib, google-auth-httplib2
@@ -18,20 +18,21 @@ import json
 import os
 import sys
 import time
+from http.client import HTTPException
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
 
-# Scopes required for uploading videos and setting thumbnails
+# Scopes required for uploading videos (upload-only; minimal permissions)
 SCOPES = [
-    "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube"
+    "https://www.googleapis.com/auth/youtube.upload"
 ]
 
-TOKEN_PATH = "youtube_token.json"
+TOKEN_PATH = os.getenv("YOUTUBE_TOKEN_PATH", ".youtube-token.json")
 
 
 def load_metadata(export_path):
@@ -73,26 +74,29 @@ def build_youtube_client(client_secrets_file):
 
 def resumable_upload(youtube, body, media_file):
     request = youtube.videos().insert(
-        part=",".join(body.keys()),
+        part="snippet,status",
         body=body,
         media_body=MediaFileUpload(media_file, chunksize=10 * 1024 * 1024, resumable=True)
     )
 
     response = None
-    error = None
     retry = 0
     while response is None:
         try:
             status, response = request.next_chunk()
             if status:
                 print(f"Upload progress: {int(status.progress() * 100)}%")
-        except Exception as e:
-            error = e
+        except (HttpError, HTTPException, OSError) as e:
+            # Only retry on transient errors (5xx server errors, connection issues)
+            if isinstance(e, HttpError) and e.resp.status < 500:
+                # Hard error (4xx): client or auth failure — don't retry
+                raise
             retry += 1
             if retry > 10:
                 raise
-            print(f"Transient error during upload: {e}. Retrying in {2 ** retry} seconds...")
-            time.sleep(2 ** retry)
+            backoff = min(2 ** retry, 60)  # cap at 60 seconds
+            print(f"Transient error during upload (attempt {retry}): {e}. Retrying in {backoff}s...")
+            time.sleep(backoff)
     return response
 
 
@@ -145,7 +149,7 @@ def main():
     }
 
     print(f"Uploading {video_file} to YouTube as '{title}' (privacy={args.privacy})...")
-    result = resumable_upload(youtube, {"snippet,status": body}, video_file)
+    result = resumable_upload(youtube, body, video_file)
     video_id = result.get("id")
     if not video_id:
         print(f"Upload failed, response: {result}")

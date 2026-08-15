@@ -95,9 +95,9 @@ jobs:
                 "client_secret": "cached",
                 "refresh_token": refresh_token
               }
-              with open("youtube_token.json", "w") as f:
+              with open(".youtube-token.json", "w") as f:
                 json.dump(creds, f)
-              print("✓ Pre-created youtube_token.json from refresh token")
+              print("✓ Pre-created .youtube-token.json from refresh token")
             EOF
           fi
 
@@ -120,4 +120,4 @@ jobs:
       - name: Clean up secrets
         if: always()
         run: |
-          rm -f client_secrets.json youtube_token.json
+          rm -f client_secrets.json .youtube-token.json

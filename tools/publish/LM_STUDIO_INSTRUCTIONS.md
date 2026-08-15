@@ -13,8 +13,8 @@ Prerequisites
 
 Notes about OAuth in LM Studio
 
-- The uploader uses the installed-app flow (opens a local browser window for consent). LM Studio desktop should allow opening the browser; if LM Studio prevents opening the browser, run the uploader from a local shell instead to complete the OAuth step, which will save youtube_token.json.
-- As an alternative, generate credentials via a local run and copy youtube_token.json to LM Studio's working directory.
+- The uploader uses the installed-app flow (opens a local browser window for consent). LM Studio desktop should allow opening the browser; if LM Studio prevents opening the browser, run the uploader from a local shell instead to complete the OAuth step, which will save .youtube-token.json (or use YOUTUBE_TOKEN_PATH to point LM Studio to a token file).
+- As an alternative, generate credentials via a local run and copy .youtube-token.json (or set YOUTUBE_TOKEN_PATH) to LM Studio's working directory.
 
 Recommended LM Studio task configuration
 
@@ -30,15 +30,15 @@ Example (LM Studio command):
 
 Headless / CI notes
 
-- For fully headless systems where browser-based OAuth is impossible, run the uploader once on a machine that can open the browser to produce youtube_token.json, then copy youtube_token.json to the headless environment. The token contains a refresh token (if consented) and will allow future uploads without re-authorizing.
+- For fully headless systems where browser-based OAuth is impossible, run the uploader once on a machine that can open the browser to produce .youtube-token.json (or set YOUTUBE_TOKEN_PATH to a token file), then copy that token to the headless environment. The token contains a refresh token (if consented) and will allow future uploads without re-authorizing.
 
 Security
 
-- Treat client_secrets.json and youtube_token.json as secrets. Store them using LM Studio's secret management or restrict file permissions.
+- Treat client_secrets.json and .youtube-token.json as secrets. Store them using LM Studio's secret management or restrict file permissions; or set YOUTUBE_TOKEN_PATH to a secure path.
 
 Troubleshooting
 
-- If the uploader fails with credential errors, delete youtube_token.json and re-run the launcher to re-authenticate.
+- If the uploader fails with credential errors, delete .youtube-token.json (or the file at YOUTUBE_TOKEN_PATH) and re-run the launcher to re-authenticate.
 - If thumbnail doesn't set, verify thumbnail file exists in exports/<project>/thumbnails/ and is a supported image type (.png/.jpg/.jpeg).
 
 Support

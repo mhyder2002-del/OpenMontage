@@ -41,7 +41,7 @@ echo "Checking dependencies (pip list may show missing packages)"
 # (Assume user installed requirements via: pip install -r requirements.txt)
 
 echo "Launching uploader for $EXPORT_PATH (privacy=$PRIVACY)"
-$PYTHON tools/publish/youtube_uploader.py --export-path "$EXPORT_PATH" --client-secrets "$CLIENT_SECRETS" --privacy "$PRIVACY"
+"$PYTHON" tools/publish/youtube_uploader.py --export-path "$EXPORT_PATH" --client-secrets "$CLIENT_SECRETS" --privacy "$PRIVACY"
 
 EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then

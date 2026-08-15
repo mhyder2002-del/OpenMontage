@@ -14,6 +14,6 @@ Quick start
 
 Notes
 
-- The script caches credentials in youtube_token.json.
+- The script caches credentials in .youtube-token.json (ignored by the repo). Override with the YOUTUBE_TOKEN_PATH environment variable if needed.
 - The script expects the export bundle layout produced by the publish director: metadata/metadata.json, video/, thumbnails/.
 - For full pipeline integration, call this script in the pipeline's publish stage after export_bundle produces the export directory. This script is intentionally standalone to keep network operations separate from the pipeline engine.
