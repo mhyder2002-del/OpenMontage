@@ -1,0 +1,21 @@
+# Hostinger VPS TLS door. Enable with: COMPOSE_PROFILES=tls docker compose up -d
+# Do not expose LM Studio :1234 here.
+
+{
+  email {$CADDY_EMAIL}
+}
+
+hermestudios.com, www.hermestudios.com {
+  encode gzip
+  reverse_proxy hermes-api:8080
+}
+
+hermestudios.org {
+  encode gzip
+  reverse_proxy hermes-api:8080
+}
+
+hermestudios.online {
+  encode gzip
+  reverse_proxy hermes-api:8080
+}

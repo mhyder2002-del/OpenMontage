@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hermes Studios</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="grain"></div>
+    <header>
+      <p class="mark">Hermes Studios</p>
+      <p class="loc">hermestudios.com</p>
+    </header>
+    <main>
+      <h1>Local models.<br />Public door.</h1>
+      <p class="lede">
+        This host is the locked gateway for Hermes Studios: OpenAI-compatible
+        <code>/v1</code>, health, and OpenMontage delivery. Production chat
+        pools sit on NVIDIA vLLM (or a hosted <code>/v1</code>). The studio
+        Mac LM Studio server is fallback only — never a raw localhost proxy.
+      </p>
+      <section class="grid">
+        <article>
+          <h2>Health</h2>
+          <pre id="health">checking…</pre>
+        </article>
+        <article>
+          <h2>Call it</h2>
+          <pre>export OPENAI_BASE_URL=https://hermestudios.com/v1
+export OPENAI_API_KEY=$HERMES_API_KEY</pre>
+        </article>
+      </section>
+    </main>
+    <footer>
+      <span>OpenMontage × LM Studio</span>
+      <a href="/health">/health</a>
+      <a href="/docs">/docs</a>
+    </footer>
+    <script>
+      fetch("/health")
+        .then((r) => r.json())
+        .then((data) => {
+          document.getElementById("health").textContent = JSON.stringify(data, null, 2);
+        })
+        .catch((err) => {
+          document.getElementById("health").textContent = String(err);
+        });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+# Named Cloudflare Tunnel example (free). Do not commit real tunnel tokens.
+# cloudflared tunnel create hermes-lmstudio
+# Then point a hostname at http://127.0.0.1:1234
+#
+# The public product URL remains https://hermestudios.com (Hermes API).
+# Clients must never be told to call this tunnel directly.
+
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /Users/YOU/.cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: lmstudio.hermestudios.com
+    service: http://127.0.0.1:1234
+  - service: http_status:404

@@ -1,0 +1,57 @@
+services:
+  hermes-api:
+    build: .
+    image: ${HERMES_IMAGE:-hermes-api:local}
+    ports:
+      - "${HERMES_HOST_PORT:-8080}:8080"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-hermestudios.com}
+      LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      LM_STUDIO_API_KEY: ${LM_STUDIO_API_KEY:-lm-studio}
+      LM_STUDIO_MODEL: ${LM_STUDIO_MODEL:-}
+      INFERENCE_BACKEND: ${INFERENCE_BACKEND:-}
+      INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-}
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
+      INFERENCE_MODEL: ${INFERENCE_MODEL:-}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
+      HERMES_REQUIRE_AUTH: ${HERMES_REQUIRE_AUTH:-true}
+      HERMES_MAX_INFLIGHT: ${HERMES_MAX_INFLIGHT:-32}
+      HERMES_INFLIGHT_WAIT_SECONDS: ${HERMES_INFLIGHT_WAIT_SECONDS:-5}
+      PYTHONUNBUFFERED: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/livez', timeout=2)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CADDY_EMAIL: ${CADDY_EMAIL:-ops@hermestudios.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      hermes-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

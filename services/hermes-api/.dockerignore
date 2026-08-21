@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+__pycache__
+*.pyc
+*.pyo
+.DS_Store
+cloudflared.yml.example
+Caddyfile
+docker-compose.yml
