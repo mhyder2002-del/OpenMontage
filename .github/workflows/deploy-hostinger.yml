@@ -1,0 +1,85 @@
+name: Deploy Hermes API to Hostinger
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "services/hermes-api/**"
+      - ".github/workflows/deploy-hostinger.yml"
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build image (no push required)
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Validate compose
+        run: |
+          docker compose -f services/hermes-api/docker-compose.yml config >/dev/null
+          COMPOSE_PROFILES=tls docker compose -f services/hermes-api/docker-compose.yml config >/dev/null
+      - id: meta
+        run: echo "image_ref=ghcr.io/${{ github.repository_owner }}/hermes-api:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/hermes-api
+          push: false
+          tags: ${{ steps.meta.outputs.image_ref }}
+          load: true
+
+  deploy-hostinger:
+    name: Hostinger VPS
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ vars.HOSTINGER_VM_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy on Hostinger VPS
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY }}
+          virtual-machine: ${{ vars.HOSTINGER_VM_ID }}
+          project-name: hermes-api
+          docker-compose-path: services/hermes-api/docker-compose.yml
+          environment-variables: |
+            PUBLIC_DOMAIN=hermestudios.com
+            COMPOSE_PROFILES=tls
+            CADDY_EMAIL=${{ secrets.CADDY_EMAIL }}
+            LM_STUDIO_BASE_URL=${{ secrets.LM_STUDIO_BASE_URL }}
+            INFERENCE_BACKEND=${{ secrets.INFERENCE_BACKEND }}
+            INFERENCE_BASE_URL=${{ secrets.INFERENCE_BASE_URL }}
+            INFERENCE_API_KEY=${{ secrets.INFERENCE_API_KEY }}
+            INFERENCE_MODEL=${{ secrets.INFERENCE_MODEL }}
+            HERMES_API_KEY=${{ secrets.HERMES_API_KEY }}
+            HERMES_REQUIRE_AUTH=true
+            HERMES_MAX_INFLIGHT=${{ vars.HERMES_MAX_INFLIGHT }}
+            HERMES_INFLIGHT_WAIT_SECONDS=5
+
+  deploy-scaffold:
+    name: Scaffold notes when Hostinger secrets are absent
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ vars.HOSTINGER_VM_ID == '' }}
+    steps:
+      - name: Print setup checklist
+        run: |
+          echo "Hostinger deploy skipped — add GitHub secrets/vars:"
+          echo "  secret HOSTINGER_API_KEY (hPanel → API)"
+          echo "  variable HOSTINGER_VM_ID"
+          echo "  secret HERMES_API_KEY"
+          echo "  secret INFERENCE_BASE_URL (vLLM or hosted /v1; preferred)"
+          echo "  secret INFERENCE_API_KEY"
+          echo "  secret LM_STUDIO_BASE_URL (Cloudflare tunnel URL, studio fallback only)"
+          echo "  secret CADDY_EMAIL (Let's Encrypt contact; optional)"
+          echo "Production compose profile: COMPOSE_PROFILES=tls (Caddy 80/443)"
+          echo "Scale configs: infra/hermes-scale/"
+          echo "Image built: ${{ needs.build.outputs.image_ref }}"
+          echo "Do not purchase a VPS or plan from CI."
