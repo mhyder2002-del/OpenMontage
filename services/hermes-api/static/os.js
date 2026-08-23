@@ -46,7 +46,12 @@ function card(label, value, hint, glow, mint) {
 const PAGES = {
   overview() {
     return `
-      <div class="grid cols-4">
+      <article class="card os-hero">
+        <div class="label">Product walkthrough</div>
+        <video class="os-hero-video" src="/static/media/hermes-os.mp4" muted loop playsinline autoplay controls preload="metadata"></video>
+        <p class="hint" style="margin:0.7rem 0 0">Muted autoplay — use controls if you want sound.</p>
+      </article>
+      <div class="grid cols-4" style="margin-top:0.75rem">
         ${card("Revenue", "$12.4k", "30d · +18%", true, true)}
         ${card("Views", "2.1M", "Across channels")}
         ${card("CTR", "6.8%", "+11% vs baseline")}
@@ -137,22 +142,14 @@ const PAGES = {
       <div class="grid cols-2">
         <article class="card">
           <strong>Campaign builder</strong>
-          ${[["niche","NICHE","AI education"],["goal","GOAL","Grow subscribers"],["platforms","PLATFORMS","YouTube Shorts, TikTok, Reels"],["budget","BUDGET","$2,000 / mo"],["freq","FREQUENCY","2 / day"]].map(([id,l,v]) => `
+          ${[["niche","NICHE","AI education"],["goal","GOAL","Grow subscribers"],["brief","BRIEF","Vertical shorts that teach one AI workflow per cut."],["platforms","PLATFORMS","YouTube Shorts, TikTok, Reels"],["budget","BUDGET","$2,000 / mo"],["freq","FREQUENCY","2 / day"]].map(([id,l,v]) => `
             <div class="field"><label for="${id}">${l}</label><input id="${id}" value="${v}" /></div>`).join("")}
-          <button type="button" class="primary" style="width:100%" data-launch>Launch</button>
+          <button type="button" class="primary" style="width:100%" data-launch>Launch campaign</button>
           <p class="hint" id="launch-status" style="margin-top:0.6rem"></p>
         </article>
         <article class="card">
-          <strong>Active campaigns</strong>
-          ${[
-            ["Everyday Carry", "edc_tech · 7 scenes · 20s"],
-            ["Everyday Carry", "edc_tech_best · 7 scenes · 19.94s"],
-            ["Hermes OS — Platform Promo", "hermes_os_promo · 4 scenes · 12.6s"],
-          ].map(([t, m]) => `
-            <div class="row">
-              <div><strong>${t}</strong><div class="hint">${m}</div></div>
-              <button type="button" class="ghost">Render</button>
-            </div>`).join("")}
+          <strong>Active cuts</strong>
+          <div id="active-cuts"><p class="hint">Launch the video-campaign agent to plan cuts.</p></div>
         </article>
       </div>`;
   },
@@ -242,9 +239,45 @@ function render() {
 
 function wire(id) {
   document.querySelectorAll("[data-launch]").forEach((b) => {
-    b.addEventListener("click", () => {
+    b.addEventListener("click", async () => {
       const el = document.getElementById("launch-status");
-      if (el) el.textContent = "Launching agent orchestra…";
+      if (el) el.textContent = "Launching video-campaign agent…";
+      const fields = {};
+      ["niche", "goal", "brief", "platforms", "budget", "freq"].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) fields[id] = input.value;
+      });
+      try {
+        const r = await fetch("/api/campaigns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...fields, launch: true, agent: "video-campaign" }),
+        });
+        const campaign = await r.json();
+        sessionStorage.setItem("hermes-active-campaign", campaign.id);
+        if (el) el.textContent = `${campaign.status} · ${campaign.id}`;
+        const cuts = document.getElementById("active-cuts");
+        const poll = async () => {
+          const c = await (await fetch(`/api/campaigns/${campaign.id}`)).json();
+          if (el) el.textContent = `${c.status} · ${c.mode} · ${c.stage || ""}`;
+          if (cuts && c.cuts && c.cuts.length) {
+            cuts.innerHTML = c.cuts.map((cut) => `
+              <div class="row">
+                <div><strong>${cut.title}</strong><div class="hint">${cut.slug} · ${cut.scenes} scenes · ${cut.duration_s}s · ${cut.label || cut.status}</div></div>
+              </div>`).join("");
+          }
+          const stream = document.getElementById("events");
+          if (stream && c.events && c.events.length) {
+            stream.textContent = c.events.slice(-1)[0].message || "running";
+          }
+          if (!["completed", "completed_healed", "failed"].includes(c.status)) {
+            setTimeout(poll, 700);
+          }
+        };
+        poll();
+      } catch (err) {
+        if (el) el.textContent = String(err);
+      }
     });
   });
   document.querySelectorAll("[data-go]").forEach((b) => {

@@ -59,7 +59,21 @@
   function views() {
     return {
       overview: `
-        <div class="grid metrics">
+        <section class="os-hero card">
+          <h2 class="section-h" style="margin:0 0 0.75rem">Product walkthrough</h2>
+          <video
+            class="os-hero-video"
+            src="/static/media/hermes-os.mp4"
+            muted
+            loop
+            playsinline
+            autoplay
+            controls
+            preload="metadata"
+          ></video>
+          <p class="muted" style="margin:0.7rem 0 0">Muted autoplay — use controls if you want sound.</p>
+        </section>
+        <div class="grid metrics" style="margin-top:0.75rem">
           ${metric("Revenue", "$12.4k", "30d · +18%", true)}
           ${metric("Views", "2.1M", "Across channels")}
           ${metric("CTR", "6.8%", "+11% vs baseline")}
@@ -122,15 +136,18 @@
             <form class="form" id="campaign-form">
               <label>Niche <input name="niche" value="AI education" autocomplete="off" /></label>
               <label>Goal <input name="goal" value="Grow subscribers" autocomplete="off" /></label>
+              <label>Brief <textarea name="brief" rows="3" placeholder="Angle, promise, CTA…">Vertical shorts that teach one AI workflow per cut.</textarea></label>
               <label>Platforms <input name="platforms" value="YouTube Shorts, TikTok, Reels" autocomplete="off" /></label>
               <label>Budget <input name="budget" value="$2,000 / mo" autocomplete="off" /></label>
               <label>Frequency <input name="freq" value="2 / day" autocomplete="off" /></label>
-              <button class="btn primary" type="submit">Launch</button>
+              <button class="btn primary" type="submit">Launch campaign</button>
               <div class="toast" id="launch-toast" aria-live="polite">${launchMsg}</div>
             </form>
           </section>
           <section class="card">
-            <h2>Active campaigns</h2>
+            <h2>Active cuts</h2>
+            <div id="active-cuts"><p class="empty">Launch a campaign to plan cuts.</p></div>
+            <h2 style="margin-top:1rem">Campaigns</h2>
             <div id="active-campaigns"><p class="empty">Loading campaigns…</p></div>
           </section>
         </div>`,
@@ -287,16 +304,31 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     }).join("");
   }
 
+  function paintCuts(cuts) {
+    const box = document.getElementById("active-cuts");
+    if (!box) return;
+    if (!cuts || !cuts.length) {
+      box.innerHTML = `<p class="empty">No cuts yet. Launch starts the video-campaign agent.</p>`;
+      return;
+    }
+    box.innerHTML = cuts.map((cut) => {
+      const meta = `${cut.slug || cut.id} · ${cut.scenes || "?"} scenes · ${cut.duration_s || "?"}s`;
+      const st = cut.label || cut.status || "";
+      return `<div class="row"><div><h3>${cut.title || "Cut"}</h3><div class="stats">${meta}</div><div class="muted">${cut.hook || ""}</div></div><span class="pill">${st}</span></div>`;
+    }).join("");
+  }
+
   function paintCampaigns(items) {
     const box = document.getElementById("active-campaigns");
     if (!box) return;
     if (!items.length) {
-      box.innerHTML = `<p class="empty">No campaigns yet. Launch one to start the orchestra.</p>`;
+      box.innerHTML = `<p class="empty">No campaigns yet. Launch one to start the video agent.</p>`;
       return;
     }
     box.innerHTML = items.map((c) => {
       const mode = c.healed ? "DRY-RUN · healed" : (c.mode || "pending");
-      return `<div class="row"><div><h3>${c.niche}</h3><div class="stats">${c.status} · ${mode} · ${c.stage || "queued"}</div></div><button class="btn" type="button" data-watch="${c.id}">Watch</button></div>`;
+      const n = (c.cuts || []).length;
+      return `<div class="row"><div><h3>${c.niche}</h3><div class="stats">${c.status} · ${mode} · ${c.stage || "queued"} · ${n} cuts · ${c.agent || "video-campaign"}</div></div><button class="btn" type="button" data-watch="${c.id}">Orchestra</button></div>`;
     }).join("");
     box.querySelectorAll("[data-watch]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -343,6 +375,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       if (id) {
         const campaign = await fetchCampaign(id);
         paintStatus(campaign);
+        paintCuts(campaign.cuts || []);
         if (campaign.status === "completed" || campaign.status === "completed_healed" || campaign.status === "failed") {
           stopPoll();
         }
@@ -393,9 +426,11 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
           await launchCampaign({
             niche: data.get("niche"),
             goal: data.get("goal"),
+            brief: data.get("brief"),
             platforms: data.get("platforms"),
             budget: data.get("budget"),
             freq: data.get("freq"),
+            agent: "video-campaign",
           });
         } catch (err) {
           launchMsg = String(err);
@@ -426,7 +461,12 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       const stream = document.getElementById("event-stream");
       if (stream) stream.innerHTML = `<p class="empty">Launching labeled dry-run orchestra…</p>`;
       try {
-        await launchCampaign({ niche: "AI education", goal: "Grow subscribers" });
+        await launchCampaign({
+          niche: "AI education",
+          goal: "Grow subscribers",
+          brief: "Labeled dry-run video campaign from Orchestra.",
+          agent: "video-campaign",
+        });
       } catch (err) {
         if (stream) stream.textContent = String(err);
       }
@@ -476,8 +516,24 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
   document.getElementById("open-cmd").addEventListener("click", openPalette);
   document.getElementById("launch-campaign").addEventListener("click", async () => {
     location.hash = "#/campaigns";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const form = document.getElementById("campaign-form");
+    const fields = { agent: "video-campaign" };
+    if (form instanceof HTMLFormElement) {
+      const data = new FormData(form);
+      fields.niche = data.get("niche");
+      fields.goal = data.get("goal");
+      fields.brief = data.get("brief");
+      fields.platforms = data.get("platforms");
+      fields.budget = data.get("budget");
+      fields.freq = data.get("freq");
+    } else {
+      fields.niche = "AI education";
+      fields.goal = "Grow subscribers";
+      fields.brief = "Autonomous video-campaign agent from the console header.";
+    }
     try {
-      await launchCampaign({ niche: "AI education", goal: "Grow subscribers" });
+      await launchCampaign(fields);
     } catch (err) {
       launchMsg = String(err);
     }

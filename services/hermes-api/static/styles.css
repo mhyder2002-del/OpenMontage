@@ -102,7 +102,7 @@ html.outro-mode .outro { display: grid; }
   letter-spacing: -0.04em;
   text-wrap: balance;
 }
-.splash .sub { color: var(--mute); font-size: 1.05rem; margin: 0 0 4.5rem; }
+.splash .sub { color: var(--mute); font-size: 1.05rem; margin: 0 0 0.4rem; }
 .live-dot {
   display: inline-flex;
   align-items: center;
@@ -229,6 +229,29 @@ nav a.active { background: #1a1a24; color: #fff; }
   height: 6px;
   border-radius: 50%;
   background: var(--accent-ink);
+}
+
+.os-hero {
+  overflow: hidden;
+}
+.os-hero-video {
+  display: block;
+  width: 100%;
+  max-height: min(62vh, 640px);
+  object-fit: cover;
+  background: #08080c;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.splash-video {
+  width: min(100%, 42rem);
+  max-height: 36vh;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #08080c;
+  margin: 1.1rem auto 0;
+  display: block;
 }
 
 .workspace {

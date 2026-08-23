@@ -65,6 +65,16 @@ body {
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
 }
+.os-hero-video {
+  display: block;
+  width: 100%;
+  max-height: min(62vh, 640px);
+  object-fit: cover;
+  background: #08080c;
+  border-radius: 0.55rem;
+  border: 1px solid var(--line);
+  margin-top: 0.7rem;
+}
 .main { display: flex; flex-direction: column; min-width: 0; }
 .bar {
   display: flex;
