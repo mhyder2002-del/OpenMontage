@@ -28,6 +28,18 @@ absent, in which case files still exist). Docker HEALTHCHECK hits
 `/livez` so a down GPU does not mark the container unhealthy. Production
 TLS is the `tls` compose profile (`COMPOSE_PROFILES=tls` → Caddy 80/443).
 
+Optional **MoneyPrinterTurbo** is a second compose profile — never required for
+the API. Probe with `moneyprinter_turbo.execute({"action": "status"})`. If the
+user wants campaign `mpt` live, they must set `MONEYPRINTER_ENABLED=true` and:
+
+```
+COMPOSE_PROFILES=moneyprinter docker compose -f services/hermes-api/docker-compose.yml up -d moneyprinter
+```
+
+Do not add `moneyprinter` to the default VPS `tls` profile. If MPT is down or
+disabled, campaigns still complete: the `mpt` stage is labeled DRY-RUN. That is
+the same contract as the OpenMontage `moneyprinter_turbo` tool.
+
 ### Step 2: Production env
 Required on the VPS:
 - `HERMES_API_KEY` (non-empty)

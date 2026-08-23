@@ -31,7 +31,7 @@ Quick routing for common explainer needs:
 | Schema | `schemas/artifacts/asset_manifest.schema.json` | Artifact validation |
 | Prior artifacts | `state.artifacts["scene_plan"]["scene_plan"]`, `state.artifacts["script"]["script"]`, `state.artifacts["proposal"]["proposal_packet"]` | What to produce |
 | Playbook | Active style playbook | Image prompts, diagram style, audio preferences |
-| Tools | `tts_selector`, `image_selector`, `video_selector`, `diagram_gen`, `code_snippet`, `music_gen` — selectors auto-discover all available providers from the registry | Generation capabilities |
+| Tools | `tts_selector`, `image_selector`, `video_selector`, optional `moneyprinter_turbo`, `diagram_gen`, `code_snippet`, `music_gen` — selectors auto-discover clip T2V providers; MPT is a separate topic→short tool | Generation capabilities |
 | Cost tracker | `tools/cost_tracker.py` | Budget governance |
 
 ## Process
@@ -123,6 +123,16 @@ Process asset tasks grouped by tool for efficiency:
 2. Apply playbook's `asset_generation.diagram_style`
 3. Generate SVG/PNG
 4. Verify all nodes and edges are present
+
+**Motion clips (`video_selector` vs `moneyprinter_turbo`)**:
+
+- Use **`video_selector`** for a **single scene clip** (T2V/I2V/stock) that you
+  will place in the explainer timeline. MPT is excluded from selector ranking
+  (`selector_routable = false`).
+- Use **`moneyprinter_turbo`** only when the user wants a **standalone short**
+  from a topic (script+TTS+stock+captions), not a scene insert. Probe `status`
+  first. If DEGRADED/UNAVAILABLE or generate is DRY-RUN, skip MPT and keep the
+  selector/compose path. Same `MONEYPRINTER_*` env as Hermes campaign `mpt`.
 
 **Code snippets (`code_snippet`)**:
 1. Extract language and code from the scene description

@@ -100,7 +100,7 @@ stages:
     required_artifacts_in: [script, scene_plan]
     produces: [render_report, artifact]
     required_tools: [composition_validator]
-    optional_tools: [breed_scorer]
+    optional_tools: [breed_scorer, moneyprinter_turbo]
     review_focus:
       - composition_validity
       - asset_completeness
@@ -132,11 +132,19 @@ stages:
         tools_available:
           - composition_validator
           - video_analyzer
+          - moneyprinter_turbo
+          - video_selector
       - name: full-render
         description: >-
           Only after skill-selection-preflight passes: run assets -> edit ->
-          compose for the full individual.
+          compose for the full individual. Optional moneyprinter_turbo is a
+          topic→short path (never required). Prefer video_selector for
+          per-scene T2V clips inside OpenMontage compose.
         human_approval_default: false
+        tools_available:
+          - composition_validator
+          - video_selector
+          - moneyprinter_turbo
         review_focus:
           - composition_validity
           - asset_completeness

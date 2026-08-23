@@ -171,6 +171,7 @@ stages:
       - image_selector
     optional_tools:
       - video_selector
+      - moneyprinter_turbo
       - math_animate
       - diagram_gen
       - code_snippet
@@ -179,6 +180,7 @@ stages:
       - tts_selector
       - image_selector
       - video_selector
+      - moneyprinter_turbo
       - diagram_gen
       - code_snippet
       - music_gen

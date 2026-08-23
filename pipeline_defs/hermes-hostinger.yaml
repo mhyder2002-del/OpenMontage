@@ -84,8 +84,8 @@ stages:
     required_artifacts_in: [brief]
     produces: [deploy_report]
     required_tools: [lmstudio]
-    optional_tools: [hostinger_deploy, youtube_upload]
-    tools_available: [lmstudio, hostinger_deploy, youtube_upload]
+    optional_tools: [hostinger_deploy, youtube_upload, moneyprinter_turbo]
+    tools_available: [lmstudio, hostinger_deploy, youtube_upload, moneyprinter_turbo]
     checkpoint_required: true
     human_approval_default: true
     review_focus:
@@ -117,7 +117,8 @@ stages:
     required_artifacts_in: [deploy_report]
     produces: [deploy_report]
     required_tools: [hostinger_deploy]
-    tools_available: [hostinger_deploy, lmstudio]
+    optional_tools: [moneyprinter_turbo]
+    tools_available: [hostinger_deploy, lmstudio, moneyprinter_turbo]
     checkpoint_required: true
     human_approval_default: true
     review_focus:

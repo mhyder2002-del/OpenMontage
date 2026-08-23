@@ -33,8 +33,10 @@ class MoneyPrinterTurbo(BaseTool):
     name = "moneyprinter_turbo"
     version = "1.0.0"
     tier = ToolTier.GENERATE
-    capability = "text_to_video"
+    capability = "video_generation"
     provider = "moneyprinterturbo"
+    # Topic→short orchestra (script+TTS+stock+captions). Not a clip T2V provider.
+    selector_routable = False
     stability = ToolStability.BETA
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.STOCHASTIC

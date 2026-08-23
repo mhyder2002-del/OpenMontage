@@ -78,6 +78,15 @@ def test_no_compose_stage():
     assert "compose" not in names
 
 
+def test_optional_moneyprinter_on_preflight_and_backend():
+    manifest = load_pipeline("hermes-hostinger")
+    pre = next(s for s in manifest["stages"] if s["name"] == "preflight")
+    backend = next(s for s in manifest["stages"] if s["name"] == "backend")
+    assert "moneyprinter_turbo" in pre["optional_tools"]
+    assert "moneyprinter_turbo" in backend["optional_tools"]
+    assert "moneyprinter_turbo" not in (backend.get("required_tools") or [])
+
+
 def test_preflight_checkpoint_roundtrip(tmp_path):
     from lib.checkpoint import read_checkpoint, write_checkpoint
 

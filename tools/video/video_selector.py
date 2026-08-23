@@ -155,8 +155,11 @@ class VideoSelector(BaseTool):
         """Auto-discover video generation providers from the registry."""
         from tools.tool_registry import registry
         registry.ensure_discovered()
-        return [t for t in registry.get_by_capability("video_generation")
-                if t.name != self.name]
+        return [
+            t
+            for t in registry.get_by_capability("video_generation")
+            if t.name != self.name and getattr(t, "selector_routable", True)
+        ]
 
     @property
     def fallback_tools(self) -> list[str]:

@@ -124,6 +124,7 @@ stages:
       - tts_selector
       - image_selector
       - video_selector
+      - moneyprinter_turbo
       - diagram_gen
       - code_snippet
       - music_gen
@@ -133,6 +134,7 @@ stages:
       - tts_selector
       - image_selector
       - video_selector
+      - moneyprinter_turbo
       - diagram_gen
       - code_snippet
       - music_gen

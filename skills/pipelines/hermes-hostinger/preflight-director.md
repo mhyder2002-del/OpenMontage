@@ -34,6 +34,12 @@ VPS.
 If the brief includes upload, run `youtube_upload` with `action: "status"`.
 Missing client secrets → degraded with install notes from the tool.
 
+### Step 3b: Optional MoneyPrinterTurbo
+If the brief includes campaign shorts, probe `moneyprinter_turbo` with
+`action: "status"`. Unset `MONEYPRINTER_ENABLED` or unreachable `:8088` is
+**degraded**, not blocked — record it on `deploy_report.checks`. Do not make
+MPT a required tool.
+
 ### Step 4: Write deploy_report
 `status`: `healthy` if LM Studio reachable; `degraded` if not; `blocked`
 only if the brief required a public deploy and Docker is unavailable.

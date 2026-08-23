@@ -19,6 +19,19 @@ For the chosen base, follow its director skills for `assets → edit → compose
 Reuse the SAME tools the base pipeline uses (no ad-hoc scripts). Record the
 render in the project so Backlot shows it.
 
+### Optional MoneyPrinterTurbo vs `video_selector`
+
+`moneyprinter_turbo` is **optional**. Never fail the render because MPT is off.
+
+| Path | When | How |
+|------|------|-----|
+| `video_selector` | Per-scene **T2V / I2V / stock** clips that will be edited into an OpenMontage compose (Remotion/HyperFrames/ffmpeg) | `video_selector.execute({prompt, operation})` — ranks real clip providers. MPT is **not** selector-routable. |
+| `moneyprinter_turbo` | A **whole topic→short** (script + Edge TTS + stock B-roll + captions) as a flywheel individual or campaign companion | `moneyprinter_turbo.execute({"action": "status"})` then `{"action": "generate", "topic": "<niche>"}` |
+
+Same env as the Hermes campaign `mpt` stage: `MONEYPRINTER_ENABLED`, `MONEYPRINTER_BASE_URL` (default `http://127.0.0.1:8088`), `MONEYPRINTER_MODE` (`http`/`cli`). Enable locally with `COMPOSE_PROFILES=moneyprinter docker compose -f services/hermes-api/docker-compose.yml up -d moneyprinter`.
+
+**Self-heal:** If `get_status()` is not AVAILABLE, or generate returns `mode: dry_run` / `label: DRY-RUN`, log that on the artifact (`mpt_mode`, `mpt_reason`) and continue the base pipeline. Do not retry paid T2V as a silent substitute without a new `decision_log` entry.
+
 ### Skill-selection discipline (read first)
 Before committing to a base pipeline, consult the **`video-media-skill-selector`**
 skill (`skills/creative/video-media-skill-selector.md`). It encodes the catalog

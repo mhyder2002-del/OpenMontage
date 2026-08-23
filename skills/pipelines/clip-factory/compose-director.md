@@ -18,10 +18,18 @@ This pipeline is Phase 1 deferred from the HyperFrames adoption schedule. `edit_
 |-------|----------|---------|
 | Schema | `schemas/artifacts/render_report.schema.json` | Artifact validation |
 | Prior artifacts | `state.artifacts["edit"]["edit_decisions"]`, `state.artifacts["assets"]["asset_manifest"]` | Clip edits and assets |
-| Tools | `video_trimmer`, `video_compose`, `audio_mixer`, `color_grade` | Render pipeline |
+| Tools | `video_trimmer`, `video_compose`, `audio_mixer`, `color_grade`; optional `moneyprinter_turbo` | Render pipeline + optional topic→short companion |
 | Media profiles | `lib/media_profiles.py` | Platform targets |
 
 ## Process
+
+### 0. Do not confuse MPT with clip extraction
+
+Clip-factory's primary path is **trim + compose source footage**. Call
+`moneyprinter_turbo` only when the brief also wants a **generated topic→short**
+(no source cut) as an extra deliverable. Use `video_selector` (via a base
+pipeline asset stage) for per-shot T2V inserts. If MPT is off, continue the
+batch; record DRY-RUN — never fail the compose stage.
 
 ### 1. Treat Each Output As Its Own Job
 

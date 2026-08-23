@@ -171,6 +171,7 @@ stages:
       - audio_enhance
       - image_selector
       - video_selector
+      - moneyprinter_turbo
       - pixabay_music
       - freesound_music
       - music_gen
@@ -179,6 +180,7 @@ stages:
       - audio_enhance
       - image_selector
       - video_selector
+      - moneyprinter_turbo
       - pixabay_music
       - freesound_music
       - music_gen

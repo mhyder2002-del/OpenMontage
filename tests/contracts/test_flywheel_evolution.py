@@ -168,3 +168,10 @@ def test_flywheel_manifest_validates():
 
 def test_flywheel_in_pipeline_list():
     assert "hermes-flywheel" in list_pipelines()
+
+
+def test_flywheel_render_optional_moneyprinter():
+    manifest = load_pipeline("hermes-flywheel")
+    render = next(s for s in manifest["stages"] if s["name"] == "render")
+    assert "moneyprinter_turbo" in render["optional_tools"]
+    assert "moneyprinter_turbo" not in (render.get("required_tools") or [])
