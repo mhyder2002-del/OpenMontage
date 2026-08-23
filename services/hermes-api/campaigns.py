@@ -25,8 +25,24 @@ ORCHESTRA_STAGES: tuple[tuple[str, str, str], ...] = (
     ("publish", "Publishing Agent", "publish"),
 )
 
-_DEFAULT_STORE = Path(__file__).resolve().parent / "data" / "campaigns.json"
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_HERE = Path(__file__).resolve().parent
+_DEFAULT_STORE = _HERE / "data" / "campaigns.json"
+
+
+def _repo_root() -> Path:
+    """OpenMontage repo when present; /app in the Hostinger image."""
+    for candidate in (_HERE, *_HERE.parents):
+        if (candidate / "tools" / "video" / "video_selector.py").is_file():
+            return candidate
+        if candidate.parent == candidate:
+            break
+    try:
+        return _HERE.parents[2]
+    except IndexError:
+        return _HERE
+
+
+_REPO_ROOT = _repo_root()
 
 
 def store_path() -> Path:
