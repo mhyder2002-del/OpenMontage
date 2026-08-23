@@ -216,18 +216,19 @@ nav a.active { background: #1a1a24; color: #fff; }
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  border: 1px solid rgba(94, 233, 164, 0.45);
-  color: var(--accent);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
   border-radius: 999px;
   padding: 0.18rem 0.55rem;
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 .badge i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-ink);
 }
 
 .workspace {
@@ -343,10 +344,10 @@ nav a:focus-visible,
   cursor: pointer;
 }
 .loop button.on {
-  background: rgba(94, 233, 164, 0.14);
-  border-color: rgba(94, 233, 164, 0.5);
-  color: var(--accent);
-  font-weight: 650;
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+  font-weight: 700;
 }
 .feed { display: grid; gap: 0.85rem; }
 .feed-item { min-width: 0; }

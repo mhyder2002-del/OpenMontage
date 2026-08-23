@@ -5,7 +5,7 @@
   --line: #26262e;
   --ink: #f4f4f5;
   --mute: #8b8b96;
-  --mint: #3ee6a0;
+  --mint: #5ee9a4;
   --font: Inter, ui-sans-serif, system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -36,9 +36,9 @@ body {
 .brand strong { display: block; font-size: 0.95rem; }
 .brand small { display: block; color: var(--mute); font-size: 0.68rem; }
 .mark {
-  width: 2rem; height: 2rem; border-radius: 999px;
+  width: 2rem; height: 2rem; border-radius: 0.55rem;
   display: grid; place-items: center; font-weight: 700; color: #08110d;
-  background: linear-gradient(135deg, #5eead4, #a78bfa);
+  background: linear-gradient(135deg, #5ee9a4, #a78bfa);
 }
 #nav { display: flex; flex-direction: column; gap: 0.15rem; overflow: auto; }
 #nav a {

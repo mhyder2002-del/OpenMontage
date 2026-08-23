@@ -9,9 +9,11 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+APP_DIR = PROJECT_ROOT / "services" / "hermes-api"
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(APP_DIR))
 
-APP_PATH = PROJECT_ROOT / "services" / "hermes-api" / "app.py"
+APP_PATH = APP_DIR / "app.py"
 
 
 def _load_app():
@@ -23,7 +25,7 @@ def _load_app():
 
 
 @pytest.fixture()
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
@@ -32,6 +34,9 @@ def client(monkeypatch):
     monkeypatch.delenv("HERMES_REQUIRE_AUTH", raising=False)
     monkeypatch.setenv("INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("INFERENCE_BACKEND", "lm_studio")
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "campaigns.json"))
+    monkeypatch.setenv("HERMES_CAMPAIGN_RETRY_SECONDS", "0")
+    monkeypatch.setenv("HERMES_CAMPAIGN_MAX_ATTEMPTS", "2")
     monkeypatch.delenv("LM_STUDIO_BASE_URL", raising=False)
     monkeypatch.delenv("HERMES_MAX_INFLIGHT", raising=False)
     module = _load_app()
@@ -134,6 +139,63 @@ def test_stream_degraded_when_inference_down(client):
     )
     assert res.status_code == 502
     assert res.json()["error"]["type"] == "inference_unavailable"
+
+
+def test_campaign_create_launch_self_heals_when_inference_down(client, tmp_path, monkeypatch):
+    http, module = client
+    store = tmp_path / "campaigns.json"
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(store))
+    monkeypatch.setenv("HERMES_CAMPAIGN_RETRY_SECONDS", "0")
+    monkeypatch.setenv("HERMES_CAMPAIGN_MAX_ATTEMPTS", "2")
+    created = http.post(
+        "/api/campaigns",
+        json={"niche": "AI education", "goal": "Grow subscribers", "launch": True},
+    )
+    assert created.status_code == 200
+    body = created.json()
+    assert body["id"]
+    assert body["status"] in {"running", "completed_healed", "completed"}
+    campaign_id = body["id"]
+    polled = None
+    for _ in range(40):
+        polled = http.get(f"/api/campaigns/{campaign_id}").json()
+        if polled["status"] in {"completed", "completed_healed", "failed"}:
+            break
+    assert polled is not None
+    assert polled["status"] == "completed_healed"
+    assert polled["healed"] is True
+    assert polled["mode"] == "dry_run"
+    types = [ev.get("type") for ev in polled["events"]]
+    assert "orchestra_started" in types
+    assert "self_heal" in types
+    assert "orchestra_completed" in types
+    assert any(ev.get("label") == "DRY-RUN" for ev in polled["events"])
+    events = http.get(f"/api/campaigns/{campaign_id}/events")
+    assert events.status_code == 200
+    assert len(events.json()["events"]) >= 6
+    listed = http.get("/api/campaigns").json()["campaigns"]
+    assert any(item["id"] == campaign_id for item in listed)
+
+
+def test_campaign_live_inference_completes_without_heal(client, tmp_path, monkeypatch):
+    http, module = client
+    store = tmp_path / "live.json"
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(store))
+
+    def fake_upstream(method, path, payload=None, timeout=12):
+        return 200, {"choices": [{"message": {"content": "Live hook for the niche."}}]}
+
+    monkeypatch.setattr(module, "_upstream", fake_upstream)
+    created = http.post("/api/campaigns", json={"niche": "Claude", "launch": True})
+    campaign_id = created.json()["id"]
+    polled = None
+    for _ in range(40):
+        polled = http.get(f"/api/campaigns/{campaign_id}").json()
+        if polled["status"] in {"completed", "completed_healed", "failed"}:
+            break
+    assert polled["status"] == "completed"
+    assert polled["healed"] is False
+    assert any(ev.get("type") == "stage_inferred" for ev in polled["events"])
 
 
 def test_cors_allows_localhost_console(client):

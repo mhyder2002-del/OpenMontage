@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,10 +13,24 @@ from typing import Any, AsyncIterator
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from campaigns import (
+    bind_infer_from_app,
+    create_campaign,
+    fail_campaign,
+    get_campaign,
+    list_campaigns,
+    run_orchestra,
+    upsert_campaign,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_LM_STUDIO = "http://127.0.0.1:1234/v1"
@@ -113,6 +128,8 @@ app.add_middleware(
         "https://hermestudios.org",
         "http://127.0.0.1:8080",
         "http://localhost:8080",
+        "http://127.0.0.1:8091",
+        "http://localhost:8091",
     ],
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["GET", "POST", "OPTIONS"],
@@ -428,6 +445,73 @@ def api_status() -> dict[str, Any]:
         "openai_base_url": f"https://{_public_domain()}/v1",
         "auth": "Bearer HERMES_API_KEY",
         "inference_backend": _inference_backend(),
+        "campaigns": "/api/campaigns",
+    }
+
+
+async def _run_campaign_job(campaign_id: str) -> None:
+    infer = bind_infer_from_app(_upstream)
+    try:
+        await run_orchestra(campaign_id, infer=infer)
+    except Exception as exc:
+        fail_campaign(campaign_id, f"Orchestra crashed after self-heal path: {exc}")
+
+
+def _campaign_or_404(campaign_id: str) -> dict[str, Any]:
+    campaign = get_campaign(campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign
+
+
+@app.get("/api/campaigns")
+def api_list_campaigns() -> dict[str, Any]:
+    return {"campaigns": list_campaigns()}
+
+
+@app.post("/api/campaigns")
+async def api_create_campaign(
+    request: Request,
+    background: BackgroundTasks,
+) -> dict[str, Any]:
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    payload = raw if isinstance(raw, dict) else {}
+    campaign = create_campaign(payload)
+    if payload.get("launch") is not False:
+        campaign["status"] = "running"
+        upsert_campaign(campaign)
+        background.add_task(_run_campaign_job, campaign["id"])
+    return campaign
+
+
+@app.post("/api/campaigns/{campaign_id}/launch")
+def api_launch_campaign(campaign_id: str, background: BackgroundTasks) -> dict[str, Any]:
+    campaign = _campaign_or_404(campaign_id)
+    if campaign.get("status") in {"running"}:
+        return campaign
+    campaign["status"] = "running"
+    upsert_campaign(campaign)
+    background.add_task(_run_campaign_job, campaign_id)
+    return get_campaign(campaign_id) or campaign
+
+
+@app.get("/api/campaigns/{campaign_id}")
+def api_get_campaign(campaign_id: str) -> dict[str, Any]:
+    return _campaign_or_404(campaign_id)
+
+
+@app.get("/api/campaigns/{campaign_id}/events")
+def api_campaign_events(campaign_id: str) -> dict[str, Any]:
+    campaign = _campaign_or_404(campaign_id)
+    return {
+        "id": campaign["id"],
+        "status": campaign.get("status"),
+        "mode": campaign.get("mode"),
+        "healed": campaign.get("healed"),
+        "events": campaign.get("events") or [],
     }
 
 

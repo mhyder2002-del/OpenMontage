@@ -4,7 +4,7 @@
     { id: "discovery", title: "Discovery", sub: "Cross-platform opportunity intelligence" },
     { id: "knowledge", title: "Knowledge Graph", sub: "Living memory of what works" },
     { id: "campaigns", title: "Campaigns", sub: "Launch autonomous media campaigns" },
-    { id: "orchestra", title: "Agent Orchestra", sub: "Live organization · event stream" },
+    { id: "orchestra", title: "Agent Orchestra", sub: "Live organization event stream" },
     { id: "debugger", title: "AI Debugger", sub: "Replayable inferences · cost · latency" },
     { id: "studio", title: "Studio", sub: "Compose scenes, hooks, and cuts" },
     { id: "evolution", title: "Evolution Lab", sub: "Crown winners. Retire losers." },
@@ -30,6 +30,8 @@
   let launchMsg = "";
   let probeMsg = "No inferences yet — run a probe or campaign.";
   let inferences = 0;
+  let pollTimer = 0;
+  const CAMPAIGN_KEY = "hermes-active-campaign";
 
   const topics = [
     { name: "Automation", competition: 0.5, velocity: 0.82, viral: 0.7, conf: 0.82 },
@@ -129,7 +131,7 @@
           </section>
           <section class="card">
             <h2>Active campaigns</h2>
-            ${campaigns.map(([n,s])=>`<div class="row"><div><h3>${n}</h3><div class="stats">${s}</div></div><button class="btn" type="button" data-render="${n}">Render</button></div>`).join("")}
+            <div id="active-campaigns"><p class="empty">Loading campaigns…</p></div>
           </section>
         </div>`,
       orchestra: `
@@ -142,7 +144,7 @@
         <section class="card" style="margin-top:0.75rem"><h2>Organization</h2><p class="empty">Loading organization…</p></section>
         <section class="card" style="margin-top:0.75rem">
           <h2>Live event stream</h2>
-          <p class="empty">Waiting for workflow events…</p>
+          <div class="feed" id="event-stream"><p class="empty">Waiting for workflow events…</p></div>
           <div class="actions" style="margin-top:0.8rem">
             <button class="btn primary" type="button" id="dry-run">Run dry-run campaign</button>
             <a class="btn" href="#/debugger">AI Debugger</a>
@@ -165,6 +167,7 @@
         <section class="card" style="margin-top:0.75rem">
           <h2>Recent inferences</h2>
           <p class="empty" id="probe-empty">${probeMsg}</p>
+          <div class="feed" id="debug-events"></div>
         </section>`,
       studio: `
         <section class="card">
@@ -276,6 +279,104 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     bindPage(page.id);
   }
 
+  function eventHtml(events) {
+    if (!events || !events.length) return `<p class="empty">Waiting for workflow events…</p>`;
+    return events.slice().reverse().map((ev) => {
+      const label = ev.label ? ` [${ev.label}]` : "";
+      return `<div class="feed-item"><time>${ev.stage || ev.type || ""}</time><strong>${ev.agent || ev.type}</strong><span>${ev.message || ""}${label}</span></div>`;
+    }).join("");
+  }
+
+  function paintCampaigns(items) {
+    const box = document.getElementById("active-campaigns");
+    if (!box) return;
+    if (!items.length) {
+      box.innerHTML = `<p class="empty">No campaigns yet. Launch one to start the orchestra.</p>`;
+      return;
+    }
+    box.innerHTML = items.map((c) => {
+      const mode = c.healed ? "DRY-RUN · healed" : (c.mode || "pending");
+      return `<div class="row"><div><h3>${c.niche}</h3><div class="stats">${c.status} · ${mode} · ${c.stage || "queued"}</div></div><button class="btn" type="button" data-watch="${c.id}">Watch</button></div>`;
+    }).join("");
+    box.querySelectorAll("[data-watch]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        sessionStorage.setItem(CAMPAIGN_KEY, btn.dataset.watch);
+        location.hash = "#/orchestra";
+      });
+    });
+  }
+
+  function paintStatus(campaign) {
+    if (!campaign) return;
+    const healed = campaign.healed ? " · self-healed dry-run" : "";
+    launchMsg = `${campaign.status}${healed} · stage ${campaign.stage || "queued"}`;
+    const toast = document.getElementById("launch-toast");
+    if (toast) toast.textContent = launchMsg;
+    const stream = document.getElementById("event-stream");
+    if (stream) stream.innerHTML = eventHtml(campaign.events);
+    const debug = document.getElementById("debug-events");
+    if (debug) debug.innerHTML = eventHtml(campaign.events);
+    const empty = document.getElementById("probe-empty");
+    if (empty && campaign.events && campaign.events.length) {
+      empty.textContent = `${campaign.events.length} orchestra events · ${campaign.status}`;
+    }
+  }
+
+  function stopPoll() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = 0;
+    }
+  }
+
+  async function fetchCampaign(id) {
+    const r = await fetch(`/api/campaigns/${id}`);
+    if (!r.ok) throw new Error(`campaign ${r.status}`);
+    return r.json();
+  }
+
+  async function refreshActive() {
+    try {
+      const list = await (await fetch("/api/campaigns")).json();
+      paintCampaigns(list.campaigns || []);
+      const id = sessionStorage.getItem(CAMPAIGN_KEY);
+      if (id) {
+        const campaign = await fetchCampaign(id);
+        paintStatus(campaign);
+        if (campaign.status === "completed" || campaign.status === "completed_healed" || campaign.status === "failed") {
+          stopPoll();
+        }
+      }
+    } catch (err) {
+      launchMsg = String(err);
+      const toast = document.getElementById("launch-toast");
+      if (toast) toast.textContent = launchMsg;
+    }
+  }
+
+  function startPoll() {
+    stopPoll();
+    refreshActive();
+    pollTimer = setInterval(refreshActive, 700);
+  }
+
+  async function launchCampaign(fields) {
+    launchMsg = "Launching agent orchestra…";
+    const toast = document.getElementById("launch-toast");
+    if (toast) toast.textContent = launchMsg;
+    const r = await fetch("/api/campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...fields, launch: true }),
+    });
+    if (!r.ok) throw new Error(`launch failed ${r.status}`);
+    const campaign = await r.json();
+    sessionStorage.setItem(CAMPAIGN_KEY, campaign.id);
+    paintStatus(campaign);
+    startPoll();
+    return campaign;
+  }
+
   function bindPage(id) {
     document.querySelectorAll("[data-loop]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -285,27 +386,50 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     });
     const form = document.getElementById("campaign-form");
     if (form) {
-      form.addEventListener("submit", (e) => {
+      form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        launchMsg = "Launching agent orchestra…";
-        render();
+        const data = new FormData(form);
+        try {
+          await launchCampaign({
+            niche: data.get("niche"),
+            goal: data.get("goal"),
+            platforms: data.get("platforms"),
+            budget: data.get("budget"),
+            freq: data.get("freq"),
+          });
+        } catch (err) {
+          launchMsg = String(err);
+          const toast = document.getElementById("launch-toast");
+          if (toast) toast.textContent = launchMsg;
+        }
       });
+      startPoll();
     }
+    if (id === "orchestra" || id === "debugger") startPoll();
     document.getElementById("probe")?.addEventListener("click", async () => {
       inferences += 1;
       probeMsg = "Probe recorded. Gateway /v1/chat/completions is the production path.";
       try {
         const r = await fetch("/health");
         const data = await r.json();
-        probeMsg = `Probe #${inferences} · backend ${data.backend || "unknown"} · reachable ${data.reachable}`;
+        const inf = data.inference || data;
+        probeMsg = `Probe #${inferences} · backend ${inf.backend || "unknown"} · reachable ${inf.reachable}`;
       } catch (err) {
         probeMsg = `Probe #${inferences} · local console (${String(err)})`;
       }
-      render();
+      const empty = document.getElementById("probe-empty");
+      if (empty) empty.textContent = probeMsg;
+      refreshActive();
     });
-    document.getElementById("refresh-probe")?.addEventListener("click", () => render());
-    document.getElementById("dry-run")?.addEventListener("click", () => {
-      location.hash = "#/campaigns";
+    document.getElementById("refresh-probe")?.addEventListener("click", () => refreshActive());
+    document.getElementById("dry-run")?.addEventListener("click", async () => {
+      const stream = document.getElementById("event-stream");
+      if (stream) stream.innerHTML = `<p class="empty">Launching labeled dry-run orchestra…</p>`;
+      try {
+        await launchCampaign({ niche: "AI education", goal: "Grow subscribers" });
+      } catch (err) {
+        if (stream) stream.textContent = String(err);
+      }
     });
   }
 
@@ -336,21 +460,39 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     palette.classList.remove("open");
   }
 
-  document.getElementById("enter-console").addEventListener("click", () => {
+  function enterFromSplash() {
     sessionStorage.setItem("hermes-entered", "1");
     enterConsole();
+  }
+  document.getElementById("enter-console").addEventListener("click", (e) => {
+    e.stopPropagation();
+    enterFromSplash();
   });
+  splash.addEventListener("click", enterFromSplash);
   document.getElementById("back-console").addEventListener("click", () => {
     location.hash = "#/overview";
     enterConsole();
   });
   document.getElementById("open-cmd").addEventListener("click", openPalette);
-  document.getElementById("launch-campaign").addEventListener("click", () => {
+  document.getElementById("launch-campaign").addEventListener("click", async () => {
     location.hash = "#/campaigns";
+    try {
+      await launchCampaign({ niche: "AI education", goal: "Grow subscribers" });
+    } catch (err) {
+      launchMsg = String(err);
+    }
   });
-  document.getElementById("menu-toggle").addEventListener("click", (e) => {
+  const menuToggle = document.getElementById("menu-toggle");
+  function closeMenu() {
+    sidebar.classList.remove("open");
+    menuToggle.setAttribute("aria-expanded", "false");
+  }
+  menuToggle.addEventListener("click", (e) => {
     const open = sidebar.classList.toggle("open");
     e.currentTarget.setAttribute("aria-expanded", String(open));
+  });
+  sidebar.querySelectorAll("nav a").forEach((a) => {
+    a.addEventListener("click", closeMenu);
   });
   palette.addEventListener("click", (e) => {
     if (e.target === palette) closePalette();
@@ -361,7 +503,10 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       b.hidden = !b.textContent.toLowerCase().includes(q);
     });
   });
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", () => {
+    closeMenu();
+    render();
+  });
   window.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
       e.preventDefault();

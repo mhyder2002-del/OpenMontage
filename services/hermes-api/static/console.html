@@ -2,54 +2,104 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Hermes OS console</title>
+    <meta
+      name="description"
+      content="Hermes OS — live AI media operating system. Research, create, optimize, and scale autonomous campaigns."
+    />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/os.css" />
+    <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <a class="skip" href="#workspace">Skip to workspace</a>
-    <div class="shell">
-      <aside class="sidebar">
-        <a class="brand" href="/">
-          <span class="mark">H</span>
+    <a class="skip" href="#main">Skip to workspace</a>
+
+    <section class="splash" id="splash" aria-label="Splash">
+      <div class="splash-inner">
+        <p class="live-dot"><i aria-hidden="true"></i> Live product walkthrough</p>
+        <div class="logo-h lg" aria-hidden="true">H</div>
+        <h1>This is the Hermes OS console.</h1>
+        <p class="sub">Every screen you’re about to see is running live.</p>
+        <button type="button" class="enter" id="enter-console">Enter console</button>
+      </div>
+    </section>
+
+    <section class="outro" id="outro" aria-label="End card">
+      <div>
+        <div class="brand-row">
+          <div class="logo-h lg" aria-hidden="true">H</div>
+          <h1>Hermes OS</h1>
+        </div>
+        <p>This isn’t a mockup. <em>It’s running right now.</em></p>
+        <hr class="glow-rule" />
+        <p style="margin-top:1.4rem">
+          <button type="button" class="enter" id="back-console">Back to console</button>
+        </p>
+      </div>
+    </section>
+
+    <div class="app" id="app">
+      <div class="mobile-nav">
+        <strong>Hermes OS</strong>
+        <button type="button" class="btn" id="menu-toggle" aria-expanded="false">Menu</button>
+      </div>
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#/overview">
+          <span class="logo-h" aria-hidden="true">H</span>
           <span>
             <strong>Hermes OS</strong>
-            <small>AI Media Operating System</small>
+            <span>AI Media Operating System</span>
           </span>
         </a>
-        <nav id="nav" aria-label="Console"></nav>
+        <nav aria-label="Console">
+          <a href="#/overview">Overview</a>
+          <a href="#/discovery">Discovery</a>
+          <a href="#/knowledge">Knowledge Graph</a>
+          <a href="#/campaigns">Campaigns</a>
+          <a href="#/orchestra">Agent Orchestra</a>
+          <a href="#/debugger">AI Debugger</a>
+          <a href="#/studio">Studio</a>
+          <a href="#/evolution">Evolution Lab</a>
+          <a href="#/analytics">Analytics</a>
+          <a href="#/memory">Memory</a>
+          <a href="#/command">Command Center</a>
+          <a href="#/publishing">Publishing</a>
+          <a href="#/uploads">Uploads</a>
+          <a href="#/settings">Settings</a>
+        </nav>
         <div class="side-foot">
           <span>v0.4.0</span>
-          <span class="badge">Autonomous</span>
+          <span class="badge"><i aria-hidden="true"></i> Autonomous</span>
         </div>
       </aside>
-      <div class="main">
-        <header class="bar">
+      <div class="workspace">
+        <header class="topbar">
           <div>
-            <h1 id="title">Overview</h1>
-            <p id="sub">Research · Create · Optimize · Scale</p>
+            <h1 id="page-title">Overview</h1>
+            <p id="page-sub">Research · Create · Optimize · Scale</p>
           </div>
           <div class="actions">
-            <button type="button" class="cmd" id="cmd-btn">⌘K Command</button>
-            <button type="button" class="primary" id="launch-btn">Launch campaign</button>
+            <button type="button" class="btn" id="open-cmd"><span class="kbd">⌘K</span> Command</button>
+            <button type="button" class="btn primary" id="launch-campaign">Launch campaign</button>
           </div>
         </header>
-        <div id="workspace" class="workspace" tabindex="-1"></div>
+        <main id="main" tabindex="-1"></main>
       </div>
     </div>
 
-    <dialog id="cmd-dialog" aria-labelledby="cmd-label">
-      <h2 id="cmd-label">Command</h2>
-      <input id="cmd-input" type="search" placeholder="Jump to a surface…" autocomplete="off" />
-      <ul id="cmd-list"></ul>
-    </dialog>
+    <div class="palette" id="palette" role="dialog" aria-modal="true" aria-labelledby="cmd-label">
+      <div class="palette-box">
+        <label id="cmd-label" class="skip" for="cmd-input">Command</label>
+        <input id="cmd-input" type="search" placeholder="Jump to a surface…" autocomplete="off" />
+        <div id="cmd-list"></div>
+      </div>
+    </div>
 
-    <script src="/static/os.js"></script>
+    <script src="/static/app.js"></script>
   </body>
 </html>
