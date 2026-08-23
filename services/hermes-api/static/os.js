@@ -115,22 +115,15 @@ const PAGES = {
       </div>
       <article class="card" style="margin-top:0.75rem">
         <strong>High-opportunity topics</strong>
-        ${TOPICS.map(([n, c, v, vir, conf]) => `
-          <div class="row">
-            <div>
-              <strong>${n}</strong>
-              <div class="hint">Competition ${c} · Velocity ${v}</div>
-            </div>
-            <div class="hint">Viral ${vir} · <span style="color:var(--mint)">Conf ${conf}</span></div>
-          </div>`).join("")}
+        <div id="discovery-nodes"><p class="hint">Loading stored knowledge nodes…</p></div>
       </article>`;
   },
   knowledge() {
     return `
       <p class="hint" id="agent-feed">Loading /api/agents/knowledge…</p>
       <div class="grid cols-3">
-        ${card("Nodes", "9", "Living graph")}
-        ${card("Relations", "8", "Causal edges")}
+        ${card("Nodes", "—", "Living graph")}
+        ${card("Relations", "—", "Causal edges")}
         ${card("Feedback loops", "Active", "Analytics → Memory", true, true)}
       </div>
       <article class="card" style="margin-top:0.75rem">
@@ -144,9 +137,9 @@ const PAGES = {
         <p class="hint">Every publish strengthens the graph. Hermes doesn’t store files — it stores causal media intelligence.</p>
       </article>
       <article class="card" style="margin-top:0.75rem">
-        <strong>Sample connections</strong>
-        <div class="pills" style="margin-top:0.8rem">
-          ${["AI","Claude","Coding","Automation","Startup","Productivity","Everyday Carry","UGC Product","YouTube Shorts"].map((t) => `<span class="pill">${t}</span>`).join("")}
+        <strong>Stored nodes</strong>
+        <div class="pills" id="kg-nodes" style="margin-top:0.8rem">
+          <span class="pill">Loading…</span>
         </div>
       </article>`;
   },
@@ -334,6 +327,7 @@ function wire(id) {
   if (id === "command") loadHealth("cmd-health");
   if (id === "settings" || id === "overview" || id === "evolution") loadBilling();
   if (id === "overview" || id === "evolution") loadFlywheel();
+  if (id === "discovery" || id === "knowledge") loadKnowledge();
   loadAgent(id);
   bindBilling();
   const fwStart = document.getElementById("flywheel-start");
@@ -362,6 +356,39 @@ function loadAgent(id) {
       }
     })
     .catch((e) => { if (el) el.textContent = String(e); });
+}
+
+function loadKnowledge() {
+  fetch("/api/knowledge/nodes")
+    .then((r) => r.json())
+    .then((d) => {
+      const nodes = d.nodes || [];
+      const list = document.getElementById("discovery-nodes");
+      if (list) {
+        if (!nodes.length) {
+          list.innerHTML = `<p class="hint">No stored nodes yet. POST /api/agent/research to upsert one.</p>`;
+        } else {
+          list.innerHTML = nodes.map((n) => `
+            <div class="row">
+              <div>
+                <strong>${n.topic}</strong>
+                <div class="hint">${n.trend || ""}</div>
+              </div>
+              <div class="hint">${n.updated_at || ""}</div>
+            </div>`).join("");
+        }
+      }
+      const pills = document.getElementById("kg-nodes");
+      if (pills) {
+        pills.innerHTML = nodes.length
+          ? nodes.map((n) => `<span class="pill">${n.topic}</span>`).join("")
+          : `<span class="pill">Empty</span>`;
+      }
+    })
+    .catch((e) => {
+      const list = document.getElementById("discovery-nodes");
+      if (list) list.textContent = String(e);
+    });
 }
 
 function loadFlywheel() {

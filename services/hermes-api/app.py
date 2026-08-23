@@ -53,6 +53,8 @@ from flywheel import (
 from agents.orchestrator import snapshot as agents_snapshot
 from agents.orchestrator import snapshot_category as agents_snapshot_category
 from agents.orchestrator import tick_all as agents_tick_all
+from db import list_knowledge_nodes
+from research import run_research
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_LM_STUDIO = "http://127.0.0.1:1234/v1"
@@ -502,6 +504,8 @@ def api_status() -> dict[str, Any]:
         "billing": "/api/billing/config",
         "flywheel": "/api/flywheel",
         "agents": "/api/agents",
+        "research": "/api/agent/research",
+        "knowledge": "/api/knowledge/nodes",
         "stripe_configured": stripe_configured(),
         "origin": CANONICAL_ORIGIN,
     }
@@ -568,6 +572,63 @@ def _campaign_or_404(campaign_id: str) -> dict[str, Any]:
 @app.get("/api/campaigns")
 def api_list_campaigns() -> dict[str, Any]:
     return {"campaigns": list_campaigns()}
+
+
+def _research_infer() -> Any:
+    timeout_raw = os.environ.get("HERMES_RESEARCH_TIMEOUT") or "4"
+    try:
+        timeout = max(0.2, float(timeout_raw))
+    except ValueError:
+        timeout = 4.0
+
+    def _infer(prompt: str) -> str:
+        from campaigns import default_inference
+
+        return default_inference(
+            prompt,
+            lambda method, path, payload, _ignored=None: _upstream(method, path, payload, timeout),
+        )
+
+    return _infer
+
+
+@app.post("/api/agent/research")
+async def api_agent_research(request: Request) -> dict[str, Any]:
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    payload = raw if isinstance(raw, dict) else {}
+    topic = str(payload.get("topic") or "AI")
+    return run_research(topic, infer=_research_infer())
+
+
+@app.get("/api/knowledge/nodes")
+def api_knowledge_nodes() -> dict[str, Any]:
+    try:
+        nodes = list_knowledge_nodes()
+    except Exception:
+        nodes = []
+    return {"nodes": nodes, "count": len(nodes)}
+
+
+@app.get("/api/discovery")
+def api_discovery() -> dict[str, Any]:
+    try:
+        nodes = list_knowledge_nodes()
+    except Exception:
+        nodes = []
+    return {
+        "topics": [
+            {
+                "name": n.get("topic"),
+                "trend": n.get("trend"),
+                "updated_at": n.get("updated_at"),
+            }
+            for n in nodes
+        ],
+        "count": len(nodes),
+    }
 
 
 @app.post("/api/campaigns")

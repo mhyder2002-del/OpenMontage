@@ -13,10 +13,10 @@ COPY requirements.billing.txt .
 RUN pip install --no-cache-dir -r requirements.txt -r requirements.billing.txt \
     && useradd --uid 10001 --system --home-dir /app --shell /usr/sbin/nologin hermes
 
-COPY app.py billing.py campaigns.py flywheel.py ./
+COPY app.py billing.py campaigns.py flywheel.py db.py research.py ./
 COPY agents ./agents
 COPY static ./static
-RUN chown -R hermes:hermes /app
+RUN mkdir -p /app/data && chown -R hermes:hermes /app
 
 USER hermes
 EXPOSE 8080

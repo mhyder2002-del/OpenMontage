@@ -37,6 +37,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     monkeypatch.setenv("HERMES_BILLING_STORE", str(tmp_path / "billing.json"))
     monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "campaigns.json"))
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "hermes.db"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     module = _load_app()
     return TestClient(module.app), module
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import json
+import time
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("INFERENCE_BACKEND", "lm_studio")
     monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "campaigns.json"))
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "hermes.db"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("HERMES_RESEARCH_TIMEOUT", "0.4")
     monkeypatch.setenv("HERMES_FLYWHEEL_STORE", str(tmp_path / "flywheel.json"))
     monkeypatch.setenv("HERMES_CAMPAIGN_RETRY_SECONDS", "0")
     monkeypatch.setenv("HERMES_CAMPAIGN_MAX_ATTEMPTS", "2")
@@ -44,6 +49,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_AGENT_CONCURRENCY", "3")
     monkeypatch.delenv("LM_STUDIO_BASE_URL", raising=False)
     monkeypatch.delenv("HERMES_MAX_INFLIGHT", raising=False)
+    import db as hermes_db
+
+    hermes_db.reset_migrate_flag()
     module = _load_app()
     return TestClient(module.app), module
 
@@ -119,6 +127,7 @@ def test_console_and_status(client):
     body = status.json()
     assert body["health"] == "/health"
     assert body["agents"] == "/api/agents"
+    assert body["research"] == "/api/agent/research"
     assert "v1" in body["openai_base_url"]
     assert module._public_domain() == "localhost"
 
@@ -439,7 +448,53 @@ def test_console_pages_bind_every_category_agent():
     dockerfile = (APP_DIR / "Dockerfile").read_text(encoding="utf-8")
     assert "flywheel.py" in dockerfile
     assert "COPY agents ./agents" in dockerfile
+    assert "db.py" in dockerfile
+    assert "research.py" in dockerfile
+    assert "/api/knowledge/nodes" in os_js
+    assert "/api/knowledge/nodes" in app_js
     compose = (APP_DIR / "docker-compose.yml").read_text(encoding="utf-8")
     assert "${HERMES_HOST_PORT:-8091}:8080" in compose
     assert "HERMES_FLYWHEEL_AUTO" in compose
     assert "HERMES_AGENTS_STORE" in compose
+    assert "DATABASE_URL" in compose
+
+
+def test_research_endpoint_self_heals_and_upserts_node(client, tmp_path):
+    http, _ = client
+    started = time.monotonic()
+    res = http.post("/api/agent/research", json={"topic": "AI"})
+    elapsed = time.monotonic() - started
+    assert res.status_code == 200
+    body = res.json()
+    assert body["topic"] == "AI"
+    assert body["trend"]
+    assert "[DRY-RUN]" in body["trend"]
+    assert body["timestamp"]
+    assert elapsed < 3
+    nodes = http.get("/api/knowledge/nodes")
+    assert nodes.status_code == 200
+    topics = {n["topic"] for n in nodes.json()["nodes"]}
+    assert "AI" in topics
+    discovery = http.get("/api/discovery")
+    assert discovery.status_code == 200
+    assert any(t["name"] == "AI" for t in discovery.json()["topics"])
+    db_file = tmp_path / "hermes.db"
+    assert db_file.is_file()
+
+
+def test_knowledge_db_migrates_json_campaigns(tmp_path, monkeypatch):
+    import db as hermes_db
+
+    store = tmp_path / "campaigns.json"
+    store.write_text(
+        json.dumps({"campaigns": {"c1": {"id": "c1", "niche": "AI", "updated_at": 1}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(store))
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "migrate.db"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    hermes_db.reset_migrate_flag()
+    path = hermes_db.ensure_db()
+    assert Path(path).is_file()
+    rows = hermes_db.list_campaign_rows()
+    assert any(r.get("id") == "c1" for r in rows)

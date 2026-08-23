@@ -123,7 +123,7 @@
         </div>
         <section class="card" style="margin-top:0.75rem">
           <h2>High-opportunity topics</h2>
-          ${topics.map((t)=>`<div class="row"><div class="min-w"><h3>${t.name}</h3><div class="stats">Competition ${t.competition} · Velocity ${t.velocity}</div></div><div style="display:flex;gap:0.5rem;align-items:center"><span class="stats">Viral ${t.viral.toFixed(2)}</span><span class="pill">Conf ${t.conf.toFixed(2)}</span></div></div>`).join("")}
+          <div id="discovery-nodes"><p class="muted">Loading stored knowledge nodes…</p></div>
         </section>`,
       knowledge: `
         <p class="muted" id="agent-feed">Loading /api/agents/knowledge…</p>
@@ -138,8 +138,8 @@
           <p class="muted">Every publish strengthens the graph. Hermes doesn’t store files — it stores causal media intelligence.</p>
         </section>
         <section class="card" style="margin-top:0.75rem">
-          <h2>Sample connections</h2>
-          <div class="chips">${["AI","Claude","Coding","Automation","Startup","Productivity","Everyday Carry","UGC Product","YouTube Shorts"].map((c)=>`<span class="chip">${c}</span>`).join("")}</div>
+          <h2>Stored nodes</h2>
+          <div class="chips" id="kg-nodes"><span class="chip">Loading…</span></div>
         </section>`,
       campaigns: `
         <p class="muted" id="agent-feed">Loading /api/agents/campaigns…</p>
@@ -360,6 +360,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     if (page.id === "command") loadHealth();
     if (page.id === "settings") loadBilling();
     if (page.id === "overview" || page.id === "evolution") loadFlywheel();
+    if (page.id === "discovery" || page.id === "knowledge") loadKnowledge();
     loadAgent(page.id);
     bindPage(page.id);
     bindBilling();
@@ -619,6 +620,28 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
         if (stream) stream.textContent = String(err);
       }
     });
+  }
+
+  async function loadKnowledge() {
+    try {
+      const data = await (await fetch("/api/knowledge/nodes")).json();
+      const nodes = data.nodes || [];
+      const list = document.getElementById("discovery-nodes");
+      if (list) {
+        list.innerHTML = nodes.length
+          ? nodes.map((n) => `<div class="row"><div class="min-w"><h3>${n.topic}</h3><div class="stats">${n.trend || ""}</div></div><span class="pill">${n.updated_at || ""}</span></div>`).join("")
+          : `<p class="muted">No stored nodes yet. POST /api/agent/research to upsert one.</p>`;
+      }
+      const pills = document.getElementById("kg-nodes");
+      if (pills) {
+        pills.innerHTML = nodes.length
+          ? nodes.map((n) => `<span class="chip">${n.topic}</span>`).join("")
+          : `<span class="chip">Empty</span>`;
+      }
+    } catch (err) {
+      const list = document.getElementById("discovery-nodes");
+      if (list) list.textContent = String(err);
+    }
   }
 
   async function loadFlywheel() {
