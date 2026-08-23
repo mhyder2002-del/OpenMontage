@@ -19,6 +19,7 @@ ORCHESTRA_STAGES: tuple[tuple[str, str, str], ...] = (
     ("plan", "Cut Planner", "idea"),
     ("route", "Video Selector", "preflight"),
     ("compose", "Composer Agent", "render"),
+    ("mpt", "MoneyPrinter Agent", "render"),
     ("score", "Analyst Agent", "score"),
     ("breed", "Evolution Lab", "breed"),
     ("publish", "Publishing Agent", "publish"),
@@ -105,6 +106,12 @@ def upsert_campaign(campaign: dict[str, Any]) -> dict[str, Any]:
     campaign["updated_at"] = _now()
     db["campaigns"][campaign["id"]] = campaign
     save_db(db)
+    try:
+        from db import upsert_campaign_row
+
+        upsert_campaign_row(campaign)
+    except Exception:
+        pass
     return campaign
 
 
@@ -158,6 +165,7 @@ def create_campaign(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "cuts": [],
         "routing": {},
         "compose": {},
+        "moneyprinter": {},
     }
     return _upsert(campaign)
 
@@ -222,6 +230,11 @@ def _simulated_artifact(stage: str, campaign: dict[str, Any]) -> str:
         return "[DRY-RUN] video_selector rank skipped (self-heal). No provider generate."
     if stage == "compose":
         return "[DRY-RUN] Composition plan queued — live render requires OpenMontage pipeline."
+    if stage == "mpt":
+        return (
+            "[DRY-RUN] MoneyPrinterTurbo skipped (not enabled or unreachable). "
+            "Set MONEYPRINTER_ENABLED=true and run the moneyprinter compose profile."
+        )
     if stage == "score":
         return "[DRY-RUN] Fitness 0.71 (simulated; inference unavailable)."
     if stage == "breed":
@@ -261,6 +274,35 @@ def rank_video_tools(prompt: str) -> dict[str, Any]:
         "explanation": str(data.get("explanation") or "")[:600],
         "live_generate": False,
     }
+
+
+def apply_moneyprinter(campaign: dict[str, Any], *, force_dry: bool) -> str:
+    """Optional MPT topic→short. Unreachable/disabled → labeled DRY-RUN without failing the run."""
+    from moneyprinter import dry_run_result, generate
+
+    topic = str(campaign.get("niche") or campaign.get("brief") or "campaign short")
+    if force_dry:
+        result = dry_run_result(topic, "campaign already in labeled dry-run")
+    else:
+        result = generate(topic)
+    campaign["moneyprinter"] = result
+    paths = list(result.get("video_paths") or [])
+    extra = {
+        "mpt_label": result.get("label"),
+        "mpt_mode": result.get("mode"),
+        "mpt_paths": paths,
+    }
+    _set_cuts_status(
+        campaign,
+        "mpt_dry" if result.get("mode") == "dry_run" else "mpt_ready",
+        extra=extra,
+    )
+    if result.get("mode") == "dry_run":
+        return (
+            f"MoneyPrinterTurbo DRY-RUN ({result.get('reason') or 'optional'}). "
+            f"paths={paths}"
+        )
+    return f"MoneyPrinterTurbo live task={result.get('task_id')} paths={paths}"
 
 
 def compose_runtime_plan() -> dict[str, Any]:
@@ -384,6 +426,8 @@ def _run_tool_stage(stage: str, campaign: dict[str, Any], used_dry: bool) -> str
         )
         engines = plan.get("render_engines") or {}
         return f"video_compose get_info engines={engines}. No execute/render."
+    if stage == "mpt":
+        return apply_moneyprinter(campaign, force_dry=dry)
     raise RuntimeError(f"not a tool stage: {stage}")
 
 
@@ -406,13 +450,16 @@ async def run_orchestra(
         campaign,
         {
             "type": "orchestra_started",
-            "message": "Launching video-campaign agent (plan cuts → video_selector rank → compose plan).",
+            "message": (
+                "Launching video-campaign agent "
+                "(plan cuts → video_selector rank → compose plan → optional MoneyPrinterTurbo)."
+            ),
             "label": "live",
             "agent": "video-campaign",
         },
     )
 
-    tool_stages = {"plan", "route", "compose"}
+    tool_stages = {"plan", "route", "compose", "mpt"}
 
     for stage, agent, flywheel_stage in ORCHESTRA_STAGES:
         campaign = get_campaign(campaign_id) or campaign
@@ -437,7 +484,7 @@ async def run_orchestra(
             if used_dry:
                 if stage == "plan":
                     campaign["cuts"] = plan_cuts(campaign, dry=True)
-                elif stage in {"route", "compose"}:
+                elif stage in {"route", "compose", "mpt"}:
                     result_text = _run_tool_stage(stage, campaign, True)
                 else:
                     result_text = _simulated_artifact(stage, campaign)
@@ -462,6 +509,7 @@ async def run_orchestra(
                         "plan": "cuts_planned",
                         "route": "video_ranked",
                         "compose": "compose_planned",
+                        "mpt": "moneyprinter_completed",
                     }[stage]
                     campaign = _append_event(
                         campaign,

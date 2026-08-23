@@ -1,0 +1,6 @@
+# Optional full clone (do not commit upstream tree)
+src/
+storage/
+*.mp4
+config.toml
+.env

@@ -96,8 +96,8 @@ CATEGORIES: tuple[CategorySpec, ...] = (
         "publishing",
         "Publishing",
         "Queue the next Shorts/TikTok/Reels slot without uploading binaries.",
-        "Name three queued titles and platforms for the next cycle.",
-        "Publishing DRY-RUN: YouTube Short + TikTok + Reels queued (metadata only).",
+        "Name three queued titles and platforms for the next cycle. Mention MoneyPrinterTurbo only if output paths exist.",
+        "Publishing DRY-RUN: YouTube Short + TikTok + Reels queued (metadata only). MPT optional.",
     ),
     CategorySpec(
         "uploads",

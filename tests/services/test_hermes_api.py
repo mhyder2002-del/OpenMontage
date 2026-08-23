@@ -247,6 +247,10 @@ def test_video_campaign_dry_run_cuts_after_heal(client):
     cuts = polled["cuts"]
     assert len(cuts) == 3
     assert all(cut.get("label") == "DRY-RUN" for cut in cuts)
+    mpt = polled.get("moneyprinter") or {}
+    assert mpt.get("label") == "DRY-RUN"
+    assert mpt.get("video_paths")
+    assert any(ev.get("type") == "moneyprinter_completed" or ev.get("stage") == "mpt" for ev in polled["events"])
     assert any("edc" in cut["slug"] or "everyday" in cut["slug"] for cut in cuts)
     events = http.get(f"/api/campaigns/{campaign_id}/events").json()
     assert events["agent"] == "video-campaign"

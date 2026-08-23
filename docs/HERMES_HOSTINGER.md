@@ -66,3 +66,20 @@ python -m tools.publishers.youtube_upload --status
 python -m tools.publishers.youtube_upload --file renders/final.mp4 --title "..." --dry-run
 ```
 Default privacy is **unlisted**. Needs `YOUTUBE_CLIENT_SECRETS_FILE`.
+
+## MoneyPrinterTurbo (optional)
+
+Canonical repo: [harry0703/MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo) (MIT).
+Hermes does **not** vendor the full tree. See `third_party/MoneyPrinterTurbo/README.md`.
+
+```bash
+# local API on :8088 — profile keeps default VPS compose unchanged
+cd services/hermes-api
+COMPOSE_PROFILES=moneyprinter docker compose up -d moneyprinter
+export MONEYPRINTER_ENABLED=true
+export MONEYPRINTER_BASE_URL=http://127.0.0.1:8088
+```
+
+Campaign stage `mpt` POSTs `{video_subject}` to `/api/v1/videos`, polls `/api/v1/tasks/{id}`,
+and writes `video_paths` onto campaign cuts. If MPT is off or down, that stage is labeled
+**DRY-RUN** and the rest of the orchestra still completes. Publishing agent appends those paths.
