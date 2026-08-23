@@ -35,8 +35,10 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("INFERENCE_BACKEND", "lm_studio")
     monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "campaigns.json"))
+    monkeypatch.setenv("HERMES_FLYWHEEL_STORE", str(tmp_path / "flywheel.json"))
     monkeypatch.setenv("HERMES_CAMPAIGN_RETRY_SECONDS", "0")
     monkeypatch.setenv("HERMES_CAMPAIGN_MAX_ATTEMPTS", "2")
+    monkeypatch.setenv("HERMES_FLYWHEEL_SLEEP_SECONDS", "0")
     monkeypatch.delenv("LM_STUDIO_BASE_URL", raising=False)
     monkeypatch.delenv("HERMES_MAX_INFLIGHT", raising=False)
     module = _load_app()
@@ -256,3 +258,79 @@ def test_cors_allows_localhost_console(client):
     )
     assert res.status_code in {200, 204}
     assert res.headers.get("access-control-allow-origin")
+
+
+def test_flywheel_tick_continues_after_healed_campaign(client):
+    http, module = client
+    import asyncio
+    import flywheel as fw
+
+    probes = module._collect_flywheel_probes()
+    assert [p["path"] for p in probes] == list(fw.SELF_CHECK_PATHS)
+    assert any(p["path"] == "/health" and p.get("inference_down") for p in probes)
+
+    fw.request_start()
+
+    async def two_ticks():
+        first = await fw.run_one_tick(
+            infer=module.bind_infer_from_app(module._upstream),
+            run_orchestra=module.run_orchestra,
+            probes=module._collect_flywheel_probes(),
+        )
+        second = await fw.run_one_tick(
+            infer=module.bind_infer_from_app(module._upstream),
+            run_orchestra=module.run_orchestra,
+            probes=module._collect_flywheel_probes(),
+        )
+        return first, second
+
+    first, second = asyncio.run(two_ticks())
+    assert first["skipped"] is False
+    assert second["skipped"] is False
+    assert first["tick"]["status"] == "completed_healed"
+    assert second["tick"]["status"] == "completed_healed"
+    assert second["cycle_count"] >= 2
+    listed = http.get("/api/campaigns").json()["campaigns"]
+    healed = [c for c in listed if c["status"] == "completed_healed"]
+    assert len(healed) >= 2
+    snap = http.get("/api/flywheel").json()
+    assert snap["cycle_count"] >= 2
+    assert snap["origin"] == "http://127.0.0.1:8091"
+
+
+def test_flywheel_stop_flag(client):
+    http, module = client
+    import asyncio
+    import flywheel as fw
+
+    fw.request_start()
+    asyncio.run(
+        fw.run_one_tick(
+            infer=module.bind_infer_from_app(module._upstream),
+            run_orchestra=module.run_orchestra,
+            probes=module._collect_flywheel_probes(),
+        )
+    )
+    stopped = http.post("/api/flywheel/stop").json()
+    assert stopped["stop_requested"] is True
+    assert stopped["running"] is False
+    via_get = http.get("/api/flywheel/stop").json()
+    assert via_get["stop_requested"] is True
+    skipped = asyncio.run(
+        fw.run_one_tick(
+            infer=module.bind_infer_from_app(module._upstream),
+            run_orchestra=module.run_orchestra,
+            probes=module._collect_flywheel_probes(),
+        )
+    )
+    assert skipped["skipped"] is True
+    assert skipped["reason"] == "stop_requested"
+
+
+def test_flywheel_http_start_returns_ok(client):
+    http, _ = client
+    started = http.post("/api/flywheel/start")
+    assert started.status_code == 200
+    body = started.json()
+    assert body["origin"] == "http://127.0.0.1:8091"
+    http.post("/api/flywheel/stop")

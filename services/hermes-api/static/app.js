@@ -92,7 +92,7 @@
           ${metric("AI Confidence", "0.91", "Prediction gate")}
           ${metric("Opportunities", "37", "High velocity")}
           ${metric("Knowledge Nodes", "5", "Living graph")}
-          ${metric("Experiments", "242", "Running / scored")}
+          ${metric("Flywheel cycles", "<span id=\"flywheel-cycles\">—</span>", "Live self-check ticks")}
           ${metric("Agents Online", "15", "Orchestra ready")}
           ${metric("Channel Health", "Strong", "Growth forecast ↑")}
         </div>
@@ -208,10 +208,18 @@
         </div>`,
       evolution: `
         <div class="grid metrics-3">
-          ${metric("Running", "242", "Scored experiments")}
-          ${metric("Crown", "#129", "Thumbnail B", true)}
+          ${metric("Flywheel cycles", "<span id=\"flywheel-cycles\">—</span>", "Completed ticks", true)}
+          ${metric("Crown", "#129", "Thumbnail B")}
           ${metric("Lift", "+18%", "Retention after hook rewrite")}
         </div>
+        <section class="card" style="margin-top:0.75rem">
+          <h2>Perpetual flywheel</h2>
+          <p class="muted" id="flywheel-status">Loading /api/flywheel…</p>
+          <div class="actions" style="margin-top:0.7rem">
+            <button class="btn primary" type="button" id="flywheel-start">Start flywheel</button>
+            <button class="btn" type="button" id="flywheel-stop">Stop</button>
+          </div>
+        </section>
         <section class="card" style="margin-top:0.75rem"><h2>Variant board</h2><p class="muted">Thumbnail B beat A on CTR. Money hooks keep winning. Losing intros are retired automatically.</p></section>`,
       analytics: `
         <div class="grid metrics">
@@ -313,6 +321,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     });
     if (page.id === "command") loadHealth();
     if (page.id === "settings") loadBilling();
+    if (page.id === "overview" || page.id === "evolution") loadFlywheel();
     bindPage(page.id);
     bindBilling();
   }
@@ -523,6 +532,14 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       startPoll();
     }
     if (id === "orchestra" || id === "debugger") startPoll();
+    document.getElementById("flywheel-start")?.addEventListener("click", async () => {
+      await fetch("/api/flywheel/start", { method: "POST" });
+      loadFlywheel();
+    });
+    document.getElementById("flywheel-stop")?.addEventListener("click", async () => {
+      await fetch("/api/flywheel/stop", { method: "POST" });
+      loadFlywheel();
+    });
     document.getElementById("probe")?.addEventListener("click", async () => {
       inferences += 1;
       probeMsg = "Probe recorded. Gateway /v1/chat/completions is the production path.";
@@ -553,6 +570,22 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
         if (stream) stream.textContent = String(err);
       }
     });
+  }
+
+  async function loadFlywheel() {
+    const status = document.getElementById("flywheel-status");
+    const cycles = document.querySelectorAll("#flywheel-cycles");
+    try {
+      const data = await (await fetch("/api/flywheel")).json();
+      const label = `${data.cycle_count || 0} cycles · ${data.running ? "running" : "stopped"}`;
+      cycles.forEach((el) => { el.textContent = String(data.cycle_count || 0); });
+      if (status) {
+        const check = data.last_self_check || {};
+        status.textContent = `${label} · origin ${data.origin}${check.inference_down ? " · DRY-RUN (inference down)" : ""}`;
+      }
+    } catch (err) {
+      if (status) status.textContent = String(err);
+    }
   }
 
   async function loadHealth() {

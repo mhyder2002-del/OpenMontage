@@ -41,11 +41,21 @@ from campaigns import (
     run_orchestra,
     upsert_campaign,
 )
+from flywheel import (
+    CANONICAL_ORIGIN,
+    SELF_CHECK_PATHS,
+    request_start as flywheel_start,
+    request_stop as flywheel_stop,
+    run_loop as flywheel_run_loop,
+    snapshot as flywheel_snapshot,
+    summarize_probe,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_LM_STUDIO = "http://127.0.0.1:1234/v1"
 START_MONOTONIC = time.monotonic()
 _INFLIGHT: asyncio.Semaphore | None = None
+_FLYWHEEL_TASK: asyncio.Task[None] | None = None
 
 
 def _inference_base() -> str:
@@ -124,9 +134,25 @@ def _default_model() -> str:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    global _INFLIGHT
+    global _INFLIGHT, _FLYWHEEL_TASK
     _INFLIGHT = asyncio.Semaphore(_max_inflight())
+    auto = (os.environ.get("HERMES_FLYWHEEL_AUTO") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if auto:
+        flywheel_start()
+        _FLYWHEEL_TASK = asyncio.create_task(_flywheel_supervisor())
     yield
+    if _FLYWHEEL_TASK is not None and not _FLYWHEEL_TASK.done():
+        flywheel_stop()
+        _FLYWHEEL_TASK.cancel()
+        try:
+            await _FLYWHEEL_TASK
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Hermes Studios", version="1.2.0", docs_url="/docs", lifespan=_lifespan)
@@ -348,6 +374,7 @@ def health() -> dict[str, Any]:
         "domain": _public_domain(),
         "uptime_seconds": round(time.monotonic() - START_MONOTONIC, 1),
         "auth_configured": bool(_api_key()),
+        "origin": CANONICAL_ORIGIN,
         "inference": {
             "backend": lm["backend"],
             "reachable": lm["reachable"],
@@ -457,7 +484,9 @@ def api_status() -> dict[str, Any]:
         "inference_backend": _inference_backend(),
         "campaigns": "/api/campaigns",
         "billing": "/api/billing/config",
+        "flywheel": "/api/flywheel",
         "stripe_configured": stripe_configured(),
+        "origin": CANONICAL_ORIGIN,
     }
 
 
@@ -467,6 +496,47 @@ async def _run_campaign_job(campaign_id: str) -> None:
         await run_orchestra(campaign_id, infer=infer)
     except Exception as exc:
         fail_campaign(campaign_id, f"Orchestra crashed after self-heal path: {exc}")
+
+
+def _probe_call(path: str, fn: Any) -> dict[str, Any]:
+    try:
+        body = fn()
+        if isinstance(body, JSONResponse):
+            return summarize_probe(path, body.status_code, json.loads(body.body.decode()))
+        return summarize_probe(path, 200, body)
+    except HTTPException as exc:
+        return summarize_probe(path, exc.status_code, {"detail": exc.detail})
+    except Exception as exc:
+        return summarize_probe(path, 500, {"error": str(exc)})
+
+
+def _collect_flywheel_probes() -> list[dict[str, Any]]:
+    probes = [
+        _probe_call("/livez", livez),
+        _probe_call("/readyz", readyz),
+        _probe_call("/health", health),
+        _probe_call("/api/status", api_status),
+        _probe_call("/api/billing/config", api_billing_config),
+        _probe_call("/api/campaigns", api_list_campaigns),
+    ]
+    assert [p["path"] for p in probes] == list(SELF_CHECK_PATHS)
+    return probes
+
+
+async def _flywheel_supervisor() -> None:
+    infer = bind_infer_from_app(_upstream)
+    await flywheel_run_loop(
+        infer=infer,
+        run_orchestra=run_orchestra,
+        collect_probes=_collect_flywheel_probes,
+        sleep=asyncio.sleep,
+    )
+
+
+def _ensure_flywheel_task() -> None:
+    global _FLYWHEEL_TASK
+    if _FLYWHEEL_TASK is None or _FLYWHEEL_TASK.done():
+        _FLYWHEEL_TASK = asyncio.create_task(_flywheel_supervisor())
 
 
 def _campaign_or_404(campaign_id: str) -> dict[str, Any]:
@@ -513,6 +583,24 @@ def api_launch_campaign(campaign_id: str, background: BackgroundTasks) -> dict[s
 @app.get("/api/campaigns/{campaign_id}")
 def api_get_campaign(campaign_id: str) -> dict[str, Any]:
     return _campaign_or_404(campaign_id)
+
+
+@app.get("/api/flywheel")
+def api_flywheel() -> dict[str, Any]:
+    return flywheel_snapshot()
+
+
+@app.post("/api/flywheel/start")
+async def api_flywheel_start() -> dict[str, Any]:
+    snap = flywheel_start()
+    _ensure_flywheel_task()
+    return snap
+
+
+@app.get("/api/flywheel/stop")
+@app.post("/api/flywheel/stop")
+def api_flywheel_stop() -> dict[str, Any]:
+    return flywheel_stop()
 
 
 @app.get("/api/billing/config")

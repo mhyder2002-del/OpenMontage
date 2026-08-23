@@ -70,7 +70,7 @@ const PAGES = {
         ${card("AI confidence", "0.91", "Prediction gate")}
         ${card("Opportunities", "37", "High velocity")}
         ${card("Knowledge nodes", "5", "Living graph")}
-        ${card("Experiments", "242", "Running / scored")}
+        ${card("Flywheel cycles", "—", "Live /api/flywheel", true, true)}
         ${card("Agents online", "15", "Orchestra ready")}
         ${card("Channel health", "Strong", "Growth forecast ↑")}
       </div>
@@ -91,6 +91,7 @@ const PAGES = {
             <span class="pill">Discover</span><span class="pill">Create</span><span class="pill">Publish</span><span class="pill">Learn</span><span class="pill on">Improve</span>
           </div>
           <p class="hint">Every publish updates the knowledge graph and evolution weights for the next campaign.</p>
+          <p class="hint" id="flywheel-status" style="margin-top:0.7rem">Flywheel: loading…</p>
         </article>
       </div>`;
   },
@@ -209,7 +210,15 @@ const PAGES = {
     return `<article class="card"><strong>Studio</strong><p class="hint">Scene stack for Hermes OS — Platform Promo and Everyday Carry. Open a campaign and press Render.</p></article>`;
   },
   evolution() {
-    return `<div class="grid cols-3">${card("Experiments","242","Running / scored")}${card("Crowned","#129","Thumbnail B")}${card("Lift","+18%","Retention")}</div>`;
+    return `<div class="grid cols-3">${card("Flywheel cycles","—","Live ticks",true,true)}${card("Crowned","#129","Thumbnail B")}${card("Lift","+18%","Retention")}</div>
+      <article class="card" style="margin-top:0.75rem">
+        <strong>Perpetual flywheel</strong>
+        <p class="hint" id="flywheel-status">Loading /api/flywheel…</p>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.7rem">
+          <button type="button" class="primary" id="flywheel-start">Start flywheel</button>
+          <button type="button" class="ghost" id="flywheel-stop">Stop</button>
+        </div>
+      </article>`;
   },
   analytics() {
     return `<div class="grid cols-4">${card("Views","2.1M","Across channels")}${card("CTR","6.8%","+11%")}${card("Retention","54%","+18% evolved")}${card("RPM","$4.20","+9%")}</div>`;
@@ -314,8 +323,31 @@ function wire(id) {
   const refresh = document.getElementById("refresh-health");
   if (refresh) refresh.addEventListener("click", runProbe);
   if (id === "command") loadHealth("cmd-health");
-  if (id === "settings" || id === "overview") loadBilling();
+  if (id === "settings" || id === "overview" || id === "evolution") loadBilling();
+  if (id === "overview" || id === "evolution") loadFlywheel();
   bindBilling();
+  const fwStart = document.getElementById("flywheel-start");
+  if (fwStart) fwStart.addEventListener("click", async () => {
+    await fetch("/api/flywheel/start", { method: "POST" });
+    loadFlywheel();
+  });
+  const fwStop = document.getElementById("flywheel-stop");
+  if (fwStop) fwStop.addEventListener("click", async () => {
+    await fetch("/api/flywheel/stop", { method: "POST" });
+    loadFlywheel();
+  });
+}
+
+function loadFlywheel() {
+  const el = document.getElementById("flywheel-status");
+  fetch("/api/flywheel")
+    .then((r) => r.json())
+    .then((d) => {
+      if (el) {
+        el.textContent = `${d.cycle_count || 0} cycles · ${d.running ? "running" : "stopped"} · ${d.origin}${d.last_self_check && d.last_self_check.inference_down ? " · DRY-RUN" : ""}`;
+      }
+    })
+    .catch((e) => { if (el) el.textContent = String(e); });
 }
 
 function loadBilling() {
