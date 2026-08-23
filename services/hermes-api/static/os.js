@@ -51,6 +51,15 @@ const PAGES = {
         <video class="os-hero-video" src="/static/media/hermes-os.mp4" muted loop playsinline autoplay controls preload="metadata"></video>
         <p class="hint" style="margin:0.7rem 0 0">Muted autoplay — use controls if you want sound.</p>
       </article>
+      <article class="card" style="margin-top:0.75rem">
+        <strong>Plans</strong>
+        <p class="hint">Stripe Checkout for campaign packs and Autonomous v0.4.0 (test mode until you approve live).</p>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.7rem">
+          <button type="button" class="primary" data-pay="campaign_launch">Pay campaign launch</button>
+          <button type="button" class="ghost" data-subscribe>Subscribe console</button>
+        </div>
+        <p class="hint" id="billing-status" style="margin-top:0.6rem"></p>
+      </article>
       <div class="grid cols-4" style="margin-top:0.75rem">
         ${card("Revenue", "$12.4k", "30d · +18%", true, true)}
         ${card("Views", "2.1M", "Across channels")}
@@ -145,6 +154,7 @@ const PAGES = {
           ${[["niche","NICHE","AI education"],["goal","GOAL","Grow subscribers"],["brief","BRIEF","Vertical shorts that teach one AI workflow per cut."],["platforms","PLATFORMS","YouTube Shorts, TikTok, Reels"],["budget","BUDGET","$2,000 / mo"],["freq","FREQUENCY","2 / day"]].map(([id,l,v]) => `
             <div class="field"><label for="${id}">${l}</label><input id="${id}" value="${v}" /></div>`).join("")}
           <button type="button" class="primary" style="width:100%" data-launch>Launch campaign</button>
+          <button type="button" class="ghost" style="width:100%;margin-top:0.5rem" data-pay="campaign_launch">Pay launch pack</button>
           <p class="hint" id="launch-status" style="margin-top:0.6rem"></p>
         </article>
         <article class="card">
@@ -217,7 +227,14 @@ const PAGES = {
     return `<article class="card"><strong>Uploads</strong><p class="hint">Drop references here. Binary YouTube upload stays on the studio Mac CLI.</p></article>`;
   },
   settings() {
-    return `<article class="card"><strong>Settings</strong><p class="hint">Domain hermestudios.com · auth required on /v1 · inference via vLLM or studio fallback.</p></article>`;
+    return `<article class="card"><strong>Settings</strong><p class="hint">Domain hermestudios.com · auth required on /v1 · inference via vLLM or studio fallback.</p>
+      <p class="hint" id="billing-status" style="margin-top:0.7rem">Loading Stripe…</p>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.7rem">
+        <button type="button" class="primary" data-pay="campaign_launch">Pay campaign launch</button>
+        <button type="button" class="ghost" data-pay="credit_pack">Credit pack</button>
+        <button type="button" class="ghost" data-subscribe>Subscribe Autonomous</button>
+      </div>
+    </article>`;
   },
 };
 
@@ -297,6 +314,55 @@ function wire(id) {
   const refresh = document.getElementById("refresh-health");
   if (refresh) refresh.addEventListener("click", runProbe);
   if (id === "command") loadHealth("cmd-health");
+  if (id === "settings" || id === "overview") loadBilling();
+  bindBilling();
+}
+
+function loadBilling() {
+  const el = document.getElementById("billing-status");
+  if (!el) return;
+  fetch("/api/billing/config")
+    .then((r) => r.json())
+    .then((d) => {
+      el.textContent = d.configured
+        ? `Stripe ${d.test_mode ? "test" : "live"} ready`
+        : (d.hint || "Set STRIPE_SECRET_KEY=sk_test_...");
+    })
+    .catch((e) => { el.textContent = String(e); });
+}
+
+function bindBilling() {
+  document.querySelectorAll("[data-pay]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const sku = btn.getAttribute("data-pay");
+      const r = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku }),
+      });
+      const data = await r.json();
+      if (data.url) window.location.href = data.url;
+      else {
+        const el = document.getElementById("billing-status") || document.getElementById("launch-status");
+        if (el) el.textContent = data.hint || data.error || JSON.stringify(data);
+      }
+    });
+  });
+  document.querySelectorAll("[data-subscribe]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const r = await fetch("/api/billing/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await r.json();
+      if (data.url) window.location.href = data.url;
+      else {
+        const el = document.getElementById("billing-status");
+        if (el) el.textContent = data.hint || data.error || JSON.stringify(data);
+      }
+    });
+  });
 }
 
 function runProbe() {

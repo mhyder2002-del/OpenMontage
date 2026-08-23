@@ -22,6 +22,16 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+from billing import (
+    apply_event,
+    configured as stripe_configured,
+    construct_event,
+    create_checkout_session,
+    entitlements as billing_entitlements,
+    not_configured_payload,
+    public_config as billing_public_config,
+    record_usage,
+)
 from campaigns import (
     bind_infer_from_app,
     create_campaign,
@@ -133,7 +143,7 @@ app.add_middleware(
     ],
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "Stripe-Signature", "Idempotency-Key"],
 )
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -446,6 +456,8 @@ def api_status() -> dict[str, Any]:
         "auth": "Bearer HERMES_API_KEY",
         "inference_backend": _inference_backend(),
         "campaigns": "/api/campaigns",
+        "billing": "/api/billing/config",
+        "stripe_configured": stripe_configured(),
     }
 
 
@@ -501,6 +513,91 @@ def api_launch_campaign(campaign_id: str, background: BackgroundTasks) -> dict[s
 @app.get("/api/campaigns/{campaign_id}")
 def api_get_campaign(campaign_id: str) -> dict[str, Any]:
     return _campaign_or_404(campaign_id)
+
+
+@app.get("/api/billing/config")
+def api_billing_config() -> dict[str, Any]:
+    return billing_public_config()
+
+
+@app.get("/api/billing/entitlements")
+def api_billing_entitlements(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_auth(authorization)
+    return {"ok": True, "entitlements": billing_entitlements()}
+
+
+@app.post("/api/billing/checkout")
+async def api_billing_checkout(request: Request) -> JSONResponse:
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    payload = raw if isinstance(raw, dict) else {}
+    sku = str(payload.get("sku") or "campaign_launch")
+    result = create_checkout_session(
+        sku,
+        campaign_id=str(payload["campaign_id"]) if payload.get("campaign_id") else None,
+        customer_email=str(payload["email"]) if payload.get("email") else None,
+        idempotency_key=(request.headers.get("idempotency-key") or None),
+    )
+    status = int(result.pop("status", 200 if result.get("ok") else 503))
+    if not result.get("ok") and status == 503:
+        body = not_configured_payload()
+        body.update(result)
+        return JSONResponse(content=body, status_code=503)
+    return JSONResponse(content=result, status_code=status)
+
+
+@app.post("/api/billing/subscribe")
+async def api_billing_subscribe(request: Request) -> JSONResponse:
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    payload = raw if isinstance(raw, dict) else {}
+    result = create_checkout_session(
+        "autonomous_console",
+        customer_email=str(payload["email"]) if payload.get("email") else None,
+        idempotency_key=(request.headers.get("idempotency-key") or None),
+    )
+    status = int(result.pop("status", 200 if result.get("ok") else 503))
+    if not result.get("ok") and status == 503:
+        body = not_configured_payload()
+        body.update(result)
+        return JSONResponse(content=body, status_code=503)
+    return JSONResponse(content=result, status_code=status)
+
+
+@app.post("/api/billing/usage")
+async def api_billing_usage(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_auth(authorization)
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    payload = raw if isinstance(raw, dict) else {}
+    return record_usage(
+        int(payload.get("quantity") or 1),
+        customer=str(payload["customer"]) if payload.get("customer") else None,
+        campaign_id=str(payload["campaign_id"]) if payload.get("campaign_id") else None,
+    )
+
+
+@app.post("/api/billing/webhook")
+async def api_billing_webhook(request: Request) -> JSONResponse:
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature")
+    try:
+        event = construct_event(payload, signature)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Webhook signature or body invalid: {exc}") from exc
+    if not isinstance(event, dict):
+        event = dict(event)
+    result = apply_event(event)
+    return JSONResponse(content=result)
 
 
 @app.get("/api/campaigns/{campaign_id}/events")

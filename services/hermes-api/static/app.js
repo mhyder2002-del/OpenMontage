@@ -73,6 +73,15 @@
           ></video>
           <p class="muted" style="margin:0.7rem 0 0">Muted autoplay — use controls if you want sound.</p>
         </section>
+        <section class="card" style="margin-top:0.75rem">
+          <h2 class="section-h" style="margin:0 0 0.6rem">Plans</h2>
+          <p class="muted">One-time campaign packs and Autonomous v0.4.0 sit on Stripe Checkout (test mode until you approve live).</p>
+          <div class="actions" style="margin-top:0.7rem">
+            <button class="btn primary" type="button" data-pay="campaign_launch">Pay campaign launch</button>
+            <button class="btn" type="button" data-subscribe>Subscribe console</button>
+            <a class="btn" href="#/settings">Settings billing</a>
+          </div>
+        </section>
         <div class="grid metrics" style="margin-top:0.75rem">
           ${metric("Revenue", "$12.4k", "30d · +18%", true)}
           ${metric("Views", "2.1M", "Across channels")}
@@ -141,6 +150,7 @@
               <label>Budget <input name="budget" value="$2,000 / mo" autocomplete="off" /></label>
               <label>Frequency <input name="freq" value="2 / day" autocomplete="off" /></label>
               <button class="btn primary" type="submit">Launch campaign</button>
+              <button class="btn" type="button" data-pay="campaign_launch">Pay launch pack</button>
               <div class="toast" id="launch-toast" aria-live="polite">${launchMsg}</div>
             </form>
           </section>
@@ -242,6 +252,15 @@
           <pre class="status" style="margin-top:0.8rem">export OPENAI_BASE_URL=https://hermestudios.com/v1
 export OPENAI_API_KEY=$HERMES_API_KEY</pre>
         </section>
+        <section class="card" style="margin-top:0.75rem" id="billing-panel">
+          <h2>Billing</h2>
+          <p class="muted" id="billing-status">Loading Stripe catalog…</p>
+          <div class="actions" style="margin-top:0.7rem">
+            <button class="btn primary" type="button" data-pay="campaign_launch">Pay campaign launch</button>
+            <button class="btn" type="button" data-pay="credit_pack">Buy credit pack</button>
+            <button class="btn" type="button" data-subscribe>Subscribe Autonomous v0.4.0</button>
+          </div>
+        </section>
         <p class="muted" style="margin:1rem 0 0"><a href="#/outro">End card</a> · <a href="/docs">/docs</a> · <a href="/health">/health</a></p>`,
     };
   }
@@ -293,7 +312,9 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       a.classList.toggle("active", a.getAttribute("href") === `#/${page.id}`);
     });
     if (page.id === "command") loadHealth();
+    if (page.id === "settings") loadBilling();
     bindPage(page.id);
+    bindBilling();
   }
 
   function eventHtml(events) {
@@ -408,6 +429,67 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     paintStatus(campaign);
     startPoll();
     return campaign;
+  }
+
+  async function loadBilling() {
+    const el = document.getElementById("billing-status");
+    if (!el) return;
+    try {
+      const r = await fetch("/api/billing/config");
+      const data = await r.json();
+      const skus = (data.products || []).map((p) => p.sku).join(", ");
+      el.textContent = data.configured
+        ? `Stripe ${data.test_mode ? "test" : "live"} · ${skus}`
+        : `Stripe not configured. ${data.hint || "Set STRIPE_SECRET_KEY=sk_test_..."}`;
+    } catch (err) {
+      el.textContent = String(err);
+    }
+  }
+
+  function bindBilling() {
+    document.querySelectorAll("[data-pay]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const sku = btn.getAttribute("data-pay");
+        try {
+          const r = await fetch("/api/billing/checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sku }),
+          });
+          const data = await r.json();
+          if (data.url) {
+            window.location.href = data.url;
+            return;
+          }
+          const toast = document.getElementById("launch-toast") || document.getElementById("billing-status");
+          if (toast) toast.textContent = data.hint || data.error || JSON.stringify(data);
+        } catch (err) {
+          const toast = document.getElementById("billing-status");
+          if (toast) toast.textContent = String(err);
+        }
+      });
+    });
+    document.querySelectorAll("[data-subscribe]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const r = await fetch("/api/billing/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          const data = await r.json();
+          if (data.url) {
+            window.location.href = data.url;
+            return;
+          }
+          const toast = document.getElementById("billing-status") || document.getElementById("launch-toast");
+          if (toast) toast.textContent = data.hint || data.error || JSON.stringify(data);
+        } catch (err) {
+          const toast = document.getElementById("billing-status");
+          if (toast) toast.textContent = String(err);
+        }
+      });
+    });
   }
 
   function bindPage(id) {
