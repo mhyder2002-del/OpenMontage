@@ -57,7 +57,9 @@ def _lm_key() -> str:
 
 
 def _public_domain() -> str:
-    return os.environ.get("PUBLIC_DOMAIN") or "hermestudios.com"
+    # Local uvicorn defaults to localhost so /v1 is usable without a production key.
+    # Docker/VPS still set PUBLIC_DOMAIN=hermestudios.com in the image and compose.
+    return os.environ.get("PUBLIC_DOMAIN") or "localhost"
 
 
 def _api_key() -> str:
@@ -112,6 +114,7 @@ app.add_middleware(
         "http://127.0.0.1:8080",
         "http://localhost:8080",
     ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
@@ -163,6 +166,21 @@ async def _inflight_slot() -> AsyncIterator[None]:
         sem.release()
 
 
+def _inference_unavailable(reason: object) -> dict[str, Any]:
+    message = f"Inference unreachable at {_inference_base()}: {reason}"
+    return {
+        "error": {
+            "message": message,
+            "type": "inference_unavailable",
+            "code": "inference_unreachable",
+            "hint": (
+                "Start LM Studio's local server (OpenAI-compatible) or set "
+                "INFERENCE_BASE_URL, e.g. http://127.0.0.1:1234/v1"
+            ),
+        }
+    }
+
+
 def _upstream(method: str, path: str, payload: dict[str, Any] | None = None, timeout: float = 120) -> tuple[int, Any]:
     url = f"{_inference_base()}{path}"
     data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -192,7 +210,11 @@ def _upstream(method: str, path: str, payload: dict[str, Any] | None = None, tim
             body = {"error": raw}
         return int(exc.code), body
     except URLError as exc:
-        return 502, {"error": f"Inference unreachable at {_inference_base()}: {exc.reason}"}
+        return 502, _inference_unavailable(exc.reason)
+    except TimeoutError as exc:
+        return 504, _inference_unavailable(exc)
+    except OSError as exc:
+        return 502, _inference_unavailable(exc)
 
 
 def _upstream_stream(path: str, payload: dict[str, Any], timeout: float = 180):
@@ -224,7 +246,17 @@ def _upstream_stream(path: str, payload: dict[str, Any], timeout: float = 180):
 
 
 def _lm_health() -> dict[str, Any]:
-    code, body = _upstream("GET", "/models", timeout=3)
+    try:
+        code, body = _upstream("GET", "/models", timeout=3)
+    except Exception as exc:  # never fail /health
+        return {
+            "reachable": False,
+            "status_code": 502,
+            "models": [],
+            "base_url_configured": _inference_base(),
+            "backend": _inference_backend(),
+            "error": str(exc),
+        }
     models = []
     if isinstance(body, dict):
         models = [
@@ -325,14 +357,19 @@ async def _proxy_json(
         payload["model"] = _default_model()
     if stream or payload.get("stream"):
         sem = await _acquire_inflight()
+        try:
+            iterator = await asyncio.to_thread(_upstream_stream, upstream_path, payload, 180)
+        except (URLError, TimeoutError, OSError) as exc:
+            sem.release()
+            reason = getattr(exc, "reason", exc)
+            return JSONResponse(content=_inference_unavailable(reason), status_code=502)
 
         def stream_and_release():
             try:
-                yield from _upstream_stream(upstream_path, payload, 180)
-            except URLError as exc:
-                yield json.dumps(
-                    {"error": f"Inference unreachable at {_inference_base()}: {exc.reason}"}
-                ).encode()
+                yield from iterator
+            except (URLError, TimeoutError, OSError) as exc:
+                reason = getattr(exc, "reason", exc)
+                yield json.dumps(_inference_unavailable(reason)).encode()
             finally:
                 sem.release()
 
@@ -392,3 +429,9 @@ def api_status() -> dict[str, Any]:
         "auth": "Bearer HERMES_API_KEY",
         "inference_backend": _inference_backend(),
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("app:app", host="127.0.0.1", port=int(os.environ.get("HERMES_HOST_PORT") or "8080"))

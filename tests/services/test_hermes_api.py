@@ -30,8 +30,9 @@ def client(monkeypatch):
     monkeypatch.setenv("PUBLIC_DOMAIN", "localhost")
     monkeypatch.delenv("HERMES_API_KEY", raising=False)
     monkeypatch.delenv("HERMES_REQUIRE_AUTH", raising=False)
-    monkeypatch.delenv("INFERENCE_BASE_URL", raising=False)
-    monkeypatch.delenv("INFERENCE_BACKEND", raising=False)
+    monkeypatch.setenv("INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("INFERENCE_BACKEND", "lm_studio")
+    monkeypatch.delenv("LM_STUDIO_BASE_URL", raising=False)
     monkeypatch.delenv("HERMES_MAX_INFLIGHT", raising=False)
     module = _load_app()
     return TestClient(module.app), module
@@ -51,7 +52,8 @@ def test_health_and_landing(client):
     assert body["service"] == "hermes-api"
     landing = http.get("/")
     assert landing.status_code == 200
-    assert b"Hermes Studios" in landing.content
+    assert b"Hermes" in landing.content
+    assert b"html" in landing.content.lower()
     assert "inference" in body
     assert body["inference"]["backend"] == "lm_studio"
     assert body["inference"]["max_inflight"] == 32
@@ -93,3 +95,55 @@ def test_inference_base_url_preferred(monkeypatch):
     assert module._inference_base() == "http://vllm.internal:8000/v1"
     assert module._inference_backend() == "vllm"
     assert module._lm_base() == "http://vllm.internal:8000/v1"
+
+
+def test_console_and_status(client):
+    http, module = client
+    console = http.get("/console")
+    assert console.status_code == 200
+    assert b"html" in console.content.lower()
+    status = http.get("/api/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["health"] == "/health"
+    assert "v1" in body["openai_base_url"]
+    assert module._public_domain() == "localhost"
+
+
+def test_v1_degraded_when_inference_down(client):
+    http, _ = client
+    chat = http.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert chat.status_code == 502
+    err = chat.json()["error"]
+    assert err["type"] == "inference_unavailable"
+    assert "1234" in err["hint"] or "INFERENCE_BASE_URL" in err["hint"]
+    embeds = http.post("/v1/embeddings", json={"input": "hello"})
+    assert embeds.status_code == 502
+    models = http.get("/v1/models")
+    assert models.status_code == 502
+    health = http.get("/health")
+    assert health.status_code == 200
+    assert health.json()["inference"]["reachable"] is False
+
+
+def test_stream_degraded_when_inference_down(client):
+    http, _ = client
+    res = http.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
+    )
+    assert res.status_code == 502
+    assert res.json()["error"]["type"] == "inference_unavailable"
+
+
+def test_cors_allows_localhost_console(client):
+    http, _ = client
+    res = http.options(
+        "/health",
+        headers={
+            "Origin": "http://127.0.0.1:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert res.status_code in {200, 204}
+    assert res.headers.get("access-control-allow-origin")

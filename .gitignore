@@ -96,6 +96,7 @@ venv/
 .venv/
 # local clean venv (built with PYTHONPATH unset to avoid hermes-agent 3.11 leakage)
 .venv_clean/
+services/hermes-api/.hermes-venv/
 
 # Local pipeline scratch output
 out/
