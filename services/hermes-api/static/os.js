@@ -207,7 +207,7 @@ const PAGES = {
       </article>`;
   },
   studio() {
-    return `<article class="card"><strong>Studio</strong><p class="hint">Scene stack for Hermes OS — Platform Promo and Everyday Carry. Open a campaign and press Render.</p></article>`;
+    return `<article class="card"><strong>Studio</strong><p class="hint" id="agent-feed">Loading /api/agents/studio…</p><p class="hint">Scene stack for Hermes OS — Platform Promo and Everyday Carry.</p></article>`;
   },
   evolution() {
     return `<div class="grid cols-3">${card("Flywheel cycles","—","Live ticks",true,true)}${card("Crowned","#129","Thumbnail B")}${card("Lift","+18%","Retention")}</div>
@@ -224,19 +224,19 @@ const PAGES = {
     return `<div class="grid cols-4">${card("Views","2.1M","Across channels")}${card("CTR","6.8%","+11%")}${card("Retention","54%","+18% evolved")}${card("RPM","$4.20","+9%")}</div>`;
   },
   memory() {
-    return `<article class="card"><strong>Learned</strong><p class="hint">Money hooks +23% CTR. Hook rewrites lift retention. Graph stores causal media intelligence, not files.</p></article>`;
+    return `<article class="card"><strong>Memory agent</strong><p class="hint" id="agent-feed">Loading /api/agents/memory…</p><p class="hint">Money hooks +23% CTR. Graph stores causal media intelligence.</p></article>`;
   },
   command() {
     return `<article class="card"><strong>Command Center</strong><p class="hint" id="cmd-health">Loading /health…</p><p class="hint">OpenAI-compatible /v1 on hermestudios.com. Bearer HERMES_API_KEY.</p></article>`;
   },
   publishing() {
-    return `<article class="card"><strong>Publishing queue</strong><p class="hint">14 scheduled. Last: 4 Shorts — YouTube + TikTok.</p></article>`;
+    return `<article class="card"><strong>Publishing agent</strong><p class="hint" id="agent-feed">Loading /api/agents/publishing…</p><p class="hint">14 scheduled. Last: 4 Shorts — YouTube + TikTok.</p></article>`;
   },
   uploads() {
-    return `<article class="card"><strong>Uploads</strong><p class="hint">Drop references here. Binary YouTube upload stays on the studio Mac CLI.</p></article>`;
+    return `<article class="card"><strong>Uploads agent</strong><p class="hint" id="agent-feed">Loading /api/agents/uploads…</p><p class="hint">Drop references here. Binary YouTube upload stays on the studio Mac CLI.</p></article>`;
   },
   settings() {
-    return `<article class="card"><strong>Settings</strong><p class="hint">Domain hermestudios.com · auth required on /v1 · inference via vLLM or studio fallback.</p>
+    return `<article class="card"><strong>Settings</strong><p class="hint" id="agent-feed">Loading /api/agents/settings…</p><p class="hint">Domain hermestudios.com · auth required on /v1 · inference via vLLM or studio fallback.</p>
       <p class="hint" id="billing-status" style="margin-top:0.7rem">Loading Stripe…</p>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.7rem">
         <button type="button" class="primary" data-pay="campaign_launch">Pay campaign launch</button>
@@ -325,6 +325,7 @@ function wire(id) {
   if (id === "command") loadHealth("cmd-health");
   if (id === "settings" || id === "overview" || id === "evolution") loadBilling();
   if (id === "overview" || id === "evolution") loadFlywheel();
+  loadAgent(id);
   bindBilling();
   const fwStart = document.getElementById("flywheel-start");
   if (fwStart) fwStart.addEventListener("click", async () => {
@@ -336,6 +337,22 @@ function wire(id) {
     await fetch("/api/flywheel/stop", { method: "POST" });
     loadFlywheel();
   });
+}
+
+function loadAgent(id) {
+  const el = document.getElementById("agent-feed");
+  fetch(`/api/agents/${id}`)
+    .then((r) => r.json())
+    .then((d) => {
+      const row = d.result || {};
+      const line = `${d.title || id} · ${row.label || row.mode || "idle"} · ${row.summary || d.goal || ""}`;
+      if (el) el.textContent = line;
+      const stream = document.getElementById("events");
+      if (id === "orchestra" && stream && (d.events || []).length) {
+        stream.textContent = d.events.slice(-1)[0].message || line;
+      }
+    })
+    .catch((e) => { if (el) el.textContent = String(e); });
 }
 
 function loadFlywheel() {

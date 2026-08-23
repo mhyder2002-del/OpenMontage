@@ -162,7 +162,14 @@
           </section>
         </div>`,
       orchestra: `
-        <div class="grid metrics">
+        <section class="card">
+          <h2>Category orchestra</h2>
+          <p class="muted" id="agent-feed">Loading /api/agents/orchestra…</p>
+          <div class="actions" style="margin-top:0.6rem">
+            <button class="btn primary" type="button" id="agents-tick">Tick all category agents</button>
+          </div>
+        </section>
+        <div class="grid metrics" style="margin-top:0.75rem">
           ${metric("CEO", "Hermes OS Orchestrator", "Orchestrator")}
           ${metric("Agents", "0", "OS + kernel")}
           ${metric("Healthy", "—%", "Runtime health")}
@@ -178,7 +185,11 @@
           </div>
         </section>`,
       debugger: `
-        <div class="grid metrics">
+        <section class="card">
+          <h2>Debugger agent</h2>
+          <p class="muted" id="agent-feed">Loading /api/agents/debugger…</p>
+        </section>
+        <div class="grid metrics" style="margin-top:0.75rem">
           ${metric("Inferences", String(inferences), "Recorded")}
           ${metric("Total Cost", "$0.0000", "USD")}
           ${metric("Avg Latency", inferences ? "42ms" : "0ms", "p50-ish avg")}
@@ -198,6 +209,10 @@
         </section>`,
       studio: `
         <section class="card">
+          <h2>Studio agent</h2>
+          <p class="muted" id="agent-feed">Loading /api/agents/studio…</p>
+        </section>
+        <section class="card" style="margin-top:0.75rem">
           <h2>Timeline</h2>
           <p class="muted">Hook → proof → payoff. 7-scene EDC cut at 20s, or a 4-scene Hermes OS promo at 12.6s.</p>
           <div class="flow" style="margin-top:1rem">${["Hook","Problem","Demo","Proof","CTA"].map((n)=>`<span>${n}</span><i>→</i>`).join("")}<span class="end">Export</span></div>
@@ -231,6 +246,10 @@
         <section class="card" style="margin-top:0.75rem"><h2>Forecast</h2><p class="muted">Channel health is Strong. Next 30 days assume the current operating loop stays on Improve.</p></section>`,
       memory: `
         <section class="card">
+          <h2>Memory agent</h2>
+          <p class="muted" id="agent-feed">Loading /api/agents/memory…</p>
+        </section>
+        <section class="card" style="margin-top:0.75rem">
           <h2>Learned</h2>
           ${["Money hooks ↑23% CTR","Short first-frame motion beats stills","EDC niches compound on Shorts + TikTok"].map((x)=>`<div class="row"><h3>${x}</h3></div>`).join("")}
         </section>`,
@@ -245,16 +264,28 @@
         </section>`,
       publishing: `
         <section class="card">
+          <h2>Publishing agent</h2>
+          <p class="muted" id="agent-feed">Loading /api/agents/publishing…</p>
+        </section>
+        <section class="card" style="margin-top:0.75rem">
           <h2>Queue · 14 scheduled</h2>
           ${["YouTube Short · Automation hook","TikTok · Claude vs coding","Reels · Everyday Carry 20s"].map((x)=>`<div class="row"><h3>${x}</h3><span class="pill">Queued</span></div>`).join("")}
         </section>`,
       uploads: `
         <section class="card">
+          <h2>Uploads agent</h2>
+          <p class="muted" id="agent-feed">Loading /api/agents/uploads…</p>
+        </section>
+        <section class="card" style="margin-top:0.75rem">
           <h2>Drop zone</h2>
           <p class="muted">Brand kits, stills, and source clips land here before Studio. Nothing is a dead file — uploads become graph nodes.</p>
         </section>`,
       settings: `
         <section class="card">
+          <h2>Settings agent</h2>
+          <p class="muted" id="agent-feed">Loading /api/agents/settings…</p>
+        </section>
+        <section class="card" style="margin-top:0.75rem">
           <h2>Public door</h2>
           <p class="muted">This host is the locked gateway for Hermes Studios: OpenAI-compatible <code>/v1</code>, health, and OpenMontage delivery.</p>
           <pre class="status" style="margin-top:0.8rem">export OPENAI_BASE_URL=https://hermestudios.com/v1
@@ -322,6 +353,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     if (page.id === "command") loadHealth();
     if (page.id === "settings") loadBilling();
     if (page.id === "overview" || page.id === "evolution") loadFlywheel();
+    loadAgent(page.id);
     bindPage(page.id);
     bindBilling();
   }
@@ -556,6 +588,16 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       refreshActive();
     });
     document.getElementById("refresh-probe")?.addEventListener("click", () => refreshActive());
+    document.getElementById("agents-tick")?.addEventListener("click", async () => {
+      const el = document.getElementById("agent-feed");
+      if (el) el.textContent = "Ticking 14 category agents…";
+      try {
+        await fetch("/api/agents/tick", { method: "POST" });
+        loadAgent("orchestra");
+      } catch (err) {
+        if (el) el.textContent = String(err);
+      }
+    });
     document.getElementById("dry-run")?.addEventListener("click", async () => {
       const stream = document.getElementById("event-stream");
       if (stream) stream.innerHTML = `<p class="empty">Launching labeled dry-run orchestra…</p>`;
@@ -585,6 +627,25 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       }
     } catch (err) {
       if (status) status.textContent = String(err);
+    }
+  }
+
+  async function loadAgent(id) {
+    const el = document.getElementById("agent-feed");
+    try {
+      const data = await (await fetch(`/api/agents/${id}`)).json();
+      const r = data.result || {};
+      const line = `${data.title || id} · ${r.label || r.mode || "idle"} · ${r.summary || data.goal || ""}`;
+      if (el) el.textContent = line;
+      const stream = document.getElementById("event-stream");
+      const debug = document.getElementById("debug-events");
+      if ((id === "orchestra" || id === "debugger") && (data.events || []).length) {
+        const extra = eventHtml(data.events);
+        if (stream && !sessionStorage.getItem(CAMPAIGN_KEY)) stream.innerHTML = extra;
+        if (debug) debug.insertAdjacentHTML("afterbegin", extra);
+      }
+    } catch (err) {
+      if (el) el.textContent = String(err);
     }
   }
 

@@ -39,6 +39,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_CAMPAIGN_RETRY_SECONDS", "0")
     monkeypatch.setenv("HERMES_CAMPAIGN_MAX_ATTEMPTS", "2")
     monkeypatch.setenv("HERMES_FLYWHEEL_SLEEP_SECONDS", "0")
+    monkeypatch.setenv("HERMES_AGENTS_STORE", str(tmp_path / "agents.json"))
+    monkeypatch.setenv("HERMES_AGENT_INFER_TIMEOUT", "0.4")
+    monkeypatch.setenv("HERMES_AGENT_CONCURRENCY", "3")
     monkeypatch.delenv("LM_STUDIO_BASE_URL", raising=False)
     monkeypatch.delenv("HERMES_MAX_INFLIGHT", raising=False)
     module = _load_app()
@@ -113,6 +116,7 @@ def test_console_and_status(client):
     assert status.status_code == 200
     body = status.json()
     assert body["health"] == "/health"
+    assert body["agents"] == "/api/agents"
     assert "v1" in body["openai_base_url"]
     assert module._public_domain() == "localhost"
 
@@ -334,3 +338,71 @@ def test_flywheel_http_start_returns_ok(client):
     body = started.json()
     assert body["origin"] == "http://127.0.0.1:8091"
     http.post("/api/flywheel/stop")
+
+
+def test_category_agents_tick_dry_run_when_lm_studio_down(client):
+    http, _ = client
+    listed = http.get("/api/agents")
+    assert listed.status_code == 200
+    assert listed.json()["count"] == 14
+    ticked = http.post("/api/agents/tick")
+    assert ticked.status_code == 200
+    body = ticked.json()
+    assert body["ok"] is True
+    assert len(body["results"]) == 14
+    assert body["tick"]["lm_studio_used"] is False
+    ids = {row["id"] for row in body["results"]}
+    assert ids == {
+        "overview",
+        "discovery",
+        "knowledge",
+        "campaigns",
+        "orchestra",
+        "debugger",
+        "studio",
+        "evolution",
+        "analytics",
+        "memory",
+        "command",
+        "publishing",
+        "uploads",
+        "settings",
+    }
+    for row in body["results"]:
+        assert row["label"] == "DRY-RUN"
+        assert row["mode"] == "dry_run"
+        assert row["summary"]
+    snap = http.get("/api/agents").json()
+    assert len(snap["categories"]) == 14
+    assert all(c.get("label") == "DRY-RUN" for c in snap["categories"])
+    studio = http.get("/api/agents/studio")
+    assert studio.status_code == 200
+    assert studio.json()["result"] is not None
+    assert studio.json()["result"]["label"] == "DRY-RUN"
+    assert studio.json()["events"]
+    missing = http.get("/api/agents/not-a-nav")
+    assert missing.status_code == 404
+
+
+def test_flywheel_tick_records_category_agents(client):
+    http, module = client
+    import asyncio
+    import flywheel as fw
+
+    fw.request_start()
+
+    async def once():
+        return await fw.run_one_tick(
+            infer=module.bind_infer_from_app(module._upstream),
+            run_orchestra=module.run_orchestra,
+            probes=module._collect_flywheel_probes(),
+        )
+
+    result = asyncio.run(once())
+    assert result["skipped"] is False
+    agents = result.get("agents") or {}
+    assert agents.get("ok") is True
+    assert len(agents.get("results") or []) == 14
+    snap = http.get("/api/agents").json()
+    assert snap["tick_count"] >= 1
+    assert all((c.get("label") or c.get("mode")) for c in snap["categories"])

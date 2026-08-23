@@ -171,8 +171,22 @@ async def run_one_tick(
     state = load_state()
     if not should_continue():
         return {"skipped": True, "reason": "stop_requested", **snapshot()}
+
+    agent_tick: dict[str, Any] | None = None
+    try:
+        from agents.orchestrator import tick_all as _tick_category_agents
+
+        agent_tick = await _tick_category_agents()
+    except Exception as exc:
+        agent_tick = {"ok": False, "error": str(exc), "mode": "dry_run"}
+
     if _running_campaigns() >= 1 or state.get("active_campaign_id"):
-        return {"skipped": True, "reason": "max_concurrent", **snapshot()}
+        return {
+            "skipped": True,
+            "reason": "max_concurrent",
+            "agents": agent_tick,
+            **snapshot(),
+        }
 
     campaign = create_campaign(
         {
@@ -204,6 +218,11 @@ async def run_one_tick(
         "self_check_ok": check.get("ok"),
         "inference_down": check.get("inference_down"),
         "mode": result.get("mode") or check.get("mode"),
+        "agents": {
+            "ok": bool((agent_tick or {}).get("ok")),
+            "count": len((agent_tick or {}).get("results") or []),
+            "lm_studio_used": bool(((agent_tick or {}).get("tick") or {}).get("lm_studio_used")),
+        },
     }
     state = load_state()
     state["cycle_count"] = int(state.get("cycle_count") or 0) + 1
@@ -213,7 +232,7 @@ async def run_one_tick(
     ticks.append(tick)
     state["ticks"] = ticks[-200:]
     save_state(state)
-    return {"skipped": False, "tick": tick, **snapshot()}
+    return {"skipped": False, "tick": tick, "agents": agent_tick, **snapshot()}
 
 
 async def run_loop(

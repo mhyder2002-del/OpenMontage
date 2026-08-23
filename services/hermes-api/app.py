@@ -50,6 +50,9 @@ from flywheel import (
     snapshot as flywheel_snapshot,
     summarize_probe,
 )
+from agents.orchestrator import snapshot as agents_snapshot
+from agents.orchestrator import snapshot_category as agents_snapshot_category
+from agents.orchestrator import tick_all as agents_tick_all
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_LM_STUDIO = "http://127.0.0.1:1234/v1"
@@ -485,6 +488,7 @@ def api_status() -> dict[str, Any]:
         "campaigns": "/api/campaigns",
         "billing": "/api/billing/config",
         "flywheel": "/api/flywheel",
+        "agents": "/api/agents",
         "stripe_configured": stripe_configured(),
         "origin": CANONICAL_ORIGIN,
     }
@@ -601,6 +605,24 @@ async def api_flywheel_start() -> dict[str, Any]:
 @app.post("/api/flywheel/stop")
 def api_flywheel_stop() -> dict[str, Any]:
     return flywheel_stop()
+
+
+@app.get("/api/agents")
+def api_agents() -> dict[str, Any]:
+    return agents_snapshot()
+
+
+@app.get("/api/agents/{category}")
+def api_agent_category(category: str) -> dict[str, Any]:
+    row = agents_snapshot_category(category)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown category")
+    return row
+
+
+@app.post("/api/agents/tick")
+async def api_agents_tick() -> dict[str, Any]:
+    return await agents_tick_all()
 
 
 @app.get("/api/billing/config")
