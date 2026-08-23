@@ -67,6 +67,8 @@ def test_health_and_landing(client):
     assert "inference" in body
     assert body["inference"]["backend"] == "lm_studio"
     assert body["inference"]["max_inflight"] == 32
+    assert body["flywheel"]["origin"] == "http://127.0.0.1:8091"
+    assert body["agents"]["count"] == 14
 
 
 def test_unauthenticated_chat_rejected_when_key_set(monkeypatch):
@@ -406,3 +408,34 @@ def test_flywheel_tick_records_category_agents(client):
     snap = http.get("/api/agents").json()
     assert snap["tick_count"] >= 1
     assert all((c.get("label") or c.get("mode")) for c in snap["categories"])
+
+
+def test_console_pages_bind_every_category_agent():
+    os_js = (APP_DIR / "static" / "os.js").read_text(encoding="utf-8")
+    app_js = (APP_DIR / "static" / "app.js").read_text(encoding="utf-8")
+    ids = [
+        "overview",
+        "discovery",
+        "knowledge",
+        "campaigns",
+        "orchestra",
+        "debugger",
+        "studio",
+        "evolution",
+        "analytics",
+        "memory",
+        "command",
+        "publishing",
+        "uploads",
+        "settings",
+    ]
+    for category in ids:
+        assert f"/api/agents/{category}" in os_js
+        assert f"/api/agents/{category}" in app_js
+    dockerfile = (APP_DIR / "Dockerfile").read_text(encoding="utf-8")
+    assert "flywheel.py" in dockerfile
+    assert "COPY agents ./agents" in dockerfile
+    compose = (APP_DIR / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "${HERMES_HOST_PORT:-8091}:8080" in compose
+    assert "HERMES_FLYWHEEL_AUTO" in compose
+    assert "HERMES_AGENTS_STORE" in compose

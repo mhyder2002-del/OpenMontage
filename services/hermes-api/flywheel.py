@@ -19,6 +19,8 @@ SELF_CHECK_PATHS = (
     "/api/status",
     "/api/billing/config",
     "/api/campaigns",
+    "/api/flywheel",
+    "/api/agents",
 )
 
 

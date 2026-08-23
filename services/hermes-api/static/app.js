@@ -96,6 +96,7 @@
           ${metric("Agents Online", "15", "Orchestra ready")}
           ${metric("Channel Health", "Strong", "Growth forecast ↑")}
         </div>
+        <p class="muted" id="agent-feed" style="margin-top:0.75rem">Loading /api/agents/overview…</p>
         <div class="grid split" style="margin-top:0.75rem">
           <section class="card">
             <h2 class="section-h" style="margin:0 0 0.85rem">AI activity</h2>
@@ -108,6 +109,7 @@
           </section>
         </div>`,
       discovery: `
+        <p class="muted" id="agent-feed">Loading /api/agents/discovery…</p>
         <section class="card">
           <h2>AI opportunity scan</h2>
           <div class="chips">${["YouTube","Reddit","TikTok","Google Trends","X","News","Competitors"].map((c,i)=>`<button type="button" class="chip${i<4?" on":""}">${c}</button>`).join("")}</div>
@@ -124,6 +126,7 @@
           ${topics.map((t)=>`<div class="row"><div class="min-w"><h3>${t.name}</h3><div class="stats">Competition ${t.competition} · Velocity ${t.velocity}</div></div><div style="display:flex;gap:0.5rem;align-items:center"><span class="stats">Viral ${t.viral.toFixed(2)}</span><span class="pill">Conf ${t.conf.toFixed(2)}</span></div></div>`).join("")}
         </section>`,
       knowledge: `
+        <p class="muted" id="agent-feed">Loading /api/agents/knowledge…</p>
         <div class="grid metrics-3">
           ${metric("Nodes", "9", "Living graph")}
           ${metric("Relations", "8", "Causal edges")}
@@ -139,6 +142,7 @@
           <div class="chips">${["AI","Claude","Coding","Automation","Startup","Productivity","Everyday Carry","UGC Product","YouTube Shorts"].map((c)=>`<span class="chip">${c}</span>`).join("")}</div>
         </section>`,
       campaigns: `
+        <p class="muted" id="agent-feed">Loading /api/agents/campaigns…</p>
         <div class="grid split">
           <section class="card">
             <h2>Campaign builder</h2>
@@ -222,6 +226,7 @@
           <section class="card"><h2>Captions</h2><p class="muted">Burned-in, high contrast, 4-word lines.</p></section>
         </div>`,
       evolution: `
+        <p class="muted" id="agent-feed">Loading /api/agents/evolution…</p>
         <div class="grid metrics-3">
           ${metric("Flywheel cycles", "<span id=\"flywheel-cycles\">—</span>", "Completed ticks", true)}
           ${metric("Crown", "#129", "Thumbnail B")}
@@ -237,6 +242,7 @@
         </section>
         <section class="card" style="margin-top:0.75rem"><h2>Variant board</h2><p class="muted">Thumbnail B beat A on CTR. Money hooks keep winning. Losing intros are retired automatically.</p></section>`,
       analytics: `
+        <p class="muted" id="agent-feed">Loading /api/agents/analytics…</p>
         <div class="grid metrics">
           ${metric("Views", "2.1M", "Across channels")}
           ${metric("CTR", "6.8%", "+11% vs baseline", true)}
@@ -254,6 +260,7 @@
           ${["Money hooks ↑23% CTR","Short first-frame motion beats stills","EDC niches compound on Shorts + TikTok"].map((x)=>`<div class="row"><h3>${x}</h3></div>`).join("")}
         </section>`,
       command: `
+        <p class="muted" id="agent-feed">Loading /api/agents/command…</p>
         <section class="card">
           <h2>Gateway</h2>
           <pre class="status" id="health-pre">checking…</pre>

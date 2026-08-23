@@ -371,6 +371,8 @@ def readyz() -> dict[str, Any]:
 @app.get("/health")
 def health() -> dict[str, Any]:
     lm = _lm_health()
+    fw = flywheel_snapshot()
+    ag = agents_snapshot()
     return {
         "ok": True,
         "service": "hermes-api",
@@ -387,6 +389,17 @@ def health() -> dict[str, Any]:
         "lm_studio": {
             "reachable": lm["reachable"],
             "models": lm["models"],
+        },
+        "flywheel": {
+            "running": fw.get("running"),
+            "cycle_count": fw.get("cycle_count"),
+            "origin": fw.get("origin"),
+            "last_self_check": fw.get("last_self_check") or {},
+        },
+        "agents": {
+            "count": ag.get("count"),
+            "tick_count": ag.get("tick_count"),
+            "concurrency": ag.get("concurrency"),
         },
     }
 
@@ -522,6 +535,8 @@ def _collect_flywheel_probes() -> list[dict[str, Any]]:
         _probe_call("/api/status", api_status),
         _probe_call("/api/billing/config", api_billing_config),
         _probe_call("/api/campaigns", api_list_campaigns),
+        _probe_call("/api/flywheel", api_flywheel),
+        _probe_call("/api/agents", api_agents),
     ]
     assert [p["path"] for p in probes] == list(SELF_CHECK_PATHS)
     return probes

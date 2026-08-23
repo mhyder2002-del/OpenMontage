@@ -46,6 +46,7 @@ function card(label, value, hint, glow, mint) {
 const PAGES = {
   overview() {
     return `
+      <p class="hint" id="agent-feed">Loading /api/agents/overview…</p>
       <article class="card os-hero">
         <div class="label">Product walkthrough</div>
         <video class="os-hero-video" src="/static/media/hermes-os.mp4" muted loop playsinline autoplay controls preload="metadata"></video>
@@ -97,6 +98,7 @@ const PAGES = {
   },
   discovery() {
     return `
+      <p class="hint" id="agent-feed">Loading /api/agents/discovery…</p>
       <article class="card">
         <strong>AI opportunity scan</strong>
         <div class="pills" style="margin:0.7rem 0">
@@ -125,6 +127,7 @@ const PAGES = {
   },
   knowledge() {
     return `
+      <p class="hint" id="agent-feed">Loading /api/agents/knowledge…</p>
       <div class="grid cols-3">
         ${card("Nodes", "9", "Living graph")}
         ${card("Relations", "8", "Causal edges")}
@@ -149,6 +152,7 @@ const PAGES = {
   },
   campaigns() {
     return `
+      <p class="hint" id="agent-feed">Loading /api/agents/campaigns…</p>
       <div class="grid cols-2">
         <article class="card">
           <strong>Campaign builder</strong>
@@ -166,6 +170,7 @@ const PAGES = {
   },
   orchestra() {
     return `
+      <p class="hint" id="agent-feed">Loading /api/agents/orchestra…</p>
       <div class="grid cols-4">
         ${card("CEO", "Hermes OS Orchestrator", "Orchestrator")}
         ${card("Agents", "15", "OS + kernel")}
@@ -187,6 +192,7 @@ const PAGES = {
   },
   debugger() {
     return `
+      <p class="hint" id="agent-feed">Loading /api/agents/debugger…</p>
       <div class="grid cols-4">
         ${card("Inferences", "0", "Recorded")}
         ${card("Total cost", "$0.0000", "USD")}
@@ -210,7 +216,8 @@ const PAGES = {
     return `<article class="card"><strong>Studio</strong><p class="hint" id="agent-feed">Loading /api/agents/studio…</p><p class="hint">Scene stack for Hermes OS — Platform Promo and Everyday Carry.</p></article>`;
   },
   evolution() {
-    return `<div class="grid cols-3">${card("Flywheel cycles","—","Live ticks",true,true)}${card("Crowned","#129","Thumbnail B")}${card("Lift","+18%","Retention")}</div>
+    return `<p class="hint" id="agent-feed">Loading /api/agents/evolution…</p>
+      <div class="grid cols-3">${card("Flywheel cycles","—","Live ticks",true,true)}${card("Crowned","#129","Thumbnail B")}${card("Lift","+18%","Retention")}</div>
       <article class="card" style="margin-top:0.75rem">
         <strong>Perpetual flywheel</strong>
         <p class="hint" id="flywheel-status">Loading /api/flywheel…</p>
@@ -221,13 +228,15 @@ const PAGES = {
       </article>`;
   },
   analytics() {
-    return `<div class="grid cols-4">${card("Views","2.1M","Across channels")}${card("CTR","6.8%","+11%")}${card("Retention","54%","+18% evolved")}${card("RPM","$4.20","+9%")}</div>`;
+    return `<p class="hint" id="agent-feed">Loading /api/agents/analytics…</p>
+      <div class="grid cols-4">${card("Views","2.1M","Across channels")}${card("CTR","6.8%","+11%")}${card("Retention","54%","+18% evolved")}${card("RPM","$4.20","+9%")}</div>`;
   },
   memory() {
     return `<article class="card"><strong>Memory agent</strong><p class="hint" id="agent-feed">Loading /api/agents/memory…</p><p class="hint">Money hooks +23% CTR. Graph stores causal media intelligence.</p></article>`;
   },
   command() {
-    return `<article class="card"><strong>Command Center</strong><p class="hint" id="cmd-health">Loading /health…</p><p class="hint">OpenAI-compatible /v1 on hermestudios.com. Bearer HERMES_API_KEY.</p></article>`;
+    return `<p class="hint" id="agent-feed">Loading /api/agents/command…</p>
+      <article class="card"><strong>Command Center</strong><p class="hint" id="cmd-health">Loading /health…</p><p class="hint">OpenAI-compatible /v1 on hermestudios.com. Bearer HERMES_API_KEY.</p></article>`;
   },
   publishing() {
     return `<article class="card"><strong>Publishing agent</strong><p class="hint" id="agent-feed">Loading /api/agents/publishing…</p><p class="hint">14 scheduled. Last: 4 Shorts — YouTube + TikTok.</p></article>`;
