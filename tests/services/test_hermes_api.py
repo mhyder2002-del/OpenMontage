@@ -157,7 +157,7 @@ def test_campaign_create_launch_self_heals_when_inference_down(client, tmp_path,
     assert body["status"] in {"running", "completed_healed", "completed"}
     campaign_id = body["id"]
     polled = None
-    for _ in range(40):
+    for _ in range(80):
         polled = http.get(f"/api/campaigns/{campaign_id}").json()
         if polled["status"] in {"completed", "completed_healed", "failed"}:
             break
@@ -186,6 +186,18 @@ def test_campaign_live_inference_completes_without_heal(client, tmp_path, monkey
         return 200, {"choices": [{"message": {"content": "Live hook for the niche."}}]}
 
     monkeypatch.setattr(module, "_upstream", fake_upstream)
+    import campaigns as camp
+
+    monkeypatch.setattr(
+        camp,
+        "rank_video_tools",
+        lambda prompt: {"top_tool": "video_selector", "ranked": 2, "live_generate": False},
+    )
+    monkeypatch.setattr(
+        camp,
+        "compose_runtime_plan",
+        lambda: {"render_engines": {"ffmpeg": True}, "live_render": False},
+    )
     created = http.post("/api/campaigns", json={"niche": "Claude", "launch": True})
     campaign_id = created.json()["id"]
     polled = None
@@ -196,6 +208,41 @@ def test_campaign_live_inference_completes_without_heal(client, tmp_path, monkey
     assert polled["status"] == "completed"
     assert polled["healed"] is False
     assert any(ev.get("type") == "stage_inferred" for ev in polled["events"])
+    assert polled.get("agent") == "video-campaign"
+    assert len(polled.get("cuts") or []) == 3
+    types = [ev.get("type") for ev in polled["events"]]
+    assert "cuts_planned" in types
+    assert "video_ranked" in types or "stage_simulated" in types
+    assert "compose_planned" in types or "self_heal" in types
+    routing = polled.get("routing") or {}
+    assert routing.get("live_generate") is False
+
+
+def test_video_campaign_dry_run_cuts_after_heal(client):
+    http, _ = client
+    created = http.post(
+        "/api/campaigns",
+        json={
+            "niche": "Everyday Carry",
+            "goal": "Grow subscribers",
+            "brief": "7-scene EDC short",
+            "launch": True,
+        },
+    )
+    campaign_id = created.json()["id"]
+    polled = None
+    for _ in range(50):
+        polled = http.get(f"/api/campaigns/{campaign_id}").json()
+        if polled["status"] in {"completed", "completed_healed", "failed"}:
+            break
+    assert polled["status"] == "completed_healed"
+    cuts = polled["cuts"]
+    assert len(cuts) == 3
+    assert all(cut.get("label") == "DRY-RUN" for cut in cuts)
+    assert any("edc" in cut["slug"] or "everyday" in cut["slug"] for cut in cuts)
+    events = http.get(f"/api/campaigns/{campaign_id}/events").json()
+    assert events["agent"] == "video-campaign"
+    assert len(events["cuts"]) == 3
 
 
 def test_cors_allows_localhost_console(client):

@@ -511,6 +511,8 @@ def api_campaign_events(campaign_id: str) -> dict[str, Any]:
         "status": campaign.get("status"),
         "mode": campaign.get("mode"),
         "healed": campaign.get("healed"),
+        "agent": campaign.get("agent") or "video-campaign",
+        "cuts": campaign.get("cuts") or [],
         "events": campaign.get("events") or [],
     }
 

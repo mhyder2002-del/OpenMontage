@@ -1,25 +1,31 @@
-"""Hermes OS campaign store + autonomous flywheel/orchestra runner."""
+"""Hermes OS campaign store + autonomous video-campaign / orchestra runner."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import re
+import sys
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+# Research/script still lead so inference outages self-heal before tool stages.
 ORCHESTRA_STAGES: tuple[tuple[str, str, str], ...] = (
     ("research", "Research Agent", "script"),
     ("script", "Writer Agent", "script"),
-    ("render", "Editor Agent", "render"),
+    ("plan", "Cut Planner", "idea"),
+    ("route", "Video Selector", "preflight"),
+    ("compose", "Composer Agent", "render"),
     ("score", "Analyst Agent", "score"),
     ("breed", "Evolution Lab", "breed"),
     ("publish", "Publishing Agent", "publish"),
 )
 
 _DEFAULT_STORE = Path(__file__).resolve().parent / "data" / "campaigns.json"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def store_path() -> Path:
@@ -41,6 +47,15 @@ def max_stage_attempts() -> int:
         return max(1, int(raw))
     except ValueError:
         return 3
+
+
+def live_media_enabled() -> bool:
+    return (os.environ.get("HERMES_CAMPAIGN_LIVE_MEDIA") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _now() -> float:
@@ -124,8 +139,10 @@ def create_campaign(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     now = _now()
     campaign = {
         "id": campaign_id,
+        "agent": "video-campaign",
         "niche": str(body.get("niche") or "AI education").strip() or "AI education",
         "goal": str(body.get("goal") or "Grow subscribers").strip() or "Grow subscribers",
+        "brief": str(body.get("brief") or "").strip(),
         "platforms": str(body.get("platforms") or "YouTube Shorts, TikTok, Reels").strip(),
         "budget": str(body.get("budget") or "$2,000 / mo").strip(),
         "frequency": str(body.get("freq") or body.get("frequency") or "2 / day").strip(),
@@ -133,16 +150,64 @@ def create_campaign(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "mode": "pending",
         "stage": None,
         "healed": False,
-        "pipeline": "hermes-flywheel",
+        "pipeline": "hermes-video-campaign",
         "created_at": now,
         "updated_at": now,
         "events": [],
         "artifacts": {},
+        "cuts": [],
+        "routing": {},
+        "compose": {},
     }
     return _upsert(campaign)
 
 
 InferenceFn = Callable[[str, dict[str, Any]], str]
+
+
+def _slug(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    return slug[:32] or "cut"
+
+
+def plan_cuts(campaign: dict[str, Any], *, dry: bool) -> list[dict[str, Any]]:
+    """Deterministic cut slate from niche/goal/brief — not a paid generation call."""
+    niche = str(campaign.get("niche") or "campaign")
+    goal = str(campaign.get("goal") or "grow")
+    brief = str(campaign.get("brief") or "").strip()
+    platforms = str(campaign.get("platforms") or "Shorts")
+    base = _slug(niche)
+    hooks = [
+        f"Hook: {niche} in 3 seconds — {goal}",
+        f"Proof cut: what actually works for {niche}",
+        f"CTA cut: subscribe path for {platforms.split(',')[0].strip()}",
+    ]
+    if brief:
+        hooks[0] = f"Hook from brief: {brief[:80]}"
+    label = "DRY-RUN" if dry else "planned"
+    mode = "dry_run" if dry else "live"
+    cuts: list[dict[str, Any]] = []
+    templates = (
+        (7, 20.0),
+        (7, 19.94),
+        (4, 12.6),
+    )
+    for i, ((scenes, duration), hook) in enumerate(zip(templates, hooks), start=1):
+        cuts.append(
+            {
+                "id": f"{base}_{i}",
+                "slug": f"{base}_{i}",
+                "title": niche,
+                "hook": hook,
+                "scenes": scenes,
+                "duration_s": duration,
+                "status": "dry_run_complete" if dry else "planned",
+                "mode": mode,
+                "label": label,
+                "asset": None,
+            }
+        )
+    return cuts
 
 
 def _simulated_artifact(stage: str, campaign: dict[str, Any]) -> str:
@@ -151,13 +216,68 @@ def _simulated_artifact(stage: str, campaign: dict[str, Any]) -> str:
         return f"[DRY-RUN] Opportunity scan for {niche}: 3 high-velocity hooks."
     if stage == "script":
         return f"[DRY-RUN] 20s script for {niche}: hook → proof → CTA."
-    if stage == "render":
-        return f"[DRY-RUN] Composition plan queued ({campaign.get('platforms')})."
+    if stage == "plan":
+        return f"[DRY-RUN] Planned {len(campaign.get('cuts') or []) or 3} vertical cuts for {niche}."
+    if stage == "route":
+        return "[DRY-RUN] video_selector rank skipped (self-heal). No provider generate."
+    if stage == "compose":
+        return "[DRY-RUN] Composition plan queued — live render requires OpenMontage pipeline."
     if stage == "score":
         return "[DRY-RUN] Fitness 0.71 (simulated; inference unavailable)."
     if stage == "breed":
         return "[DRY-RUN] Next-gen seeds: hook mutation + CTA variant."
     return f"[DRY-RUN] Publish queued for {campaign.get('platforms')} (no live upload)."
+
+
+def _ensure_repo_on_path() -> None:
+    root = str(_REPO_ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+
+def rank_video_tools(prompt: str) -> dict[str, Any]:
+    """Registry rank only — never text_to_video generation from this agent."""
+    _ensure_repo_on_path()
+    from tools.video.video_selector import VideoSelector
+
+    result = VideoSelector().execute(
+        {
+            "prompt": prompt,
+            "operation": "rank",
+            "target_operation": "text_to_video",
+            "aspect_ratio": "9:16",
+            "duration": "8",
+        }
+    )
+    if not result.success:
+        raise RuntimeError(result.error or "video_selector rank failed")
+    data = result.data if isinstance(result.data, dict) else {}
+    rankings = data.get("rankings") or []
+    top = rankings[0] if rankings and isinstance(rankings[0], dict) else {}
+    return {
+        "top_tool": top.get("tool_name") or top.get("name") or "none",
+        "top_status": top.get("status"),
+        "ranked": len(rankings),
+        "explanation": str(data.get("explanation") or "")[:600],
+        "live_generate": False,
+    }
+
+
+def compose_runtime_plan() -> dict[str, Any]:
+    _ensure_repo_on_path()
+    from tools.video.video_compose import VideoCompose
+
+    info = VideoCompose().get_info()
+    engines = info.get("render_engines") or {}
+    return {
+        "render_engines": engines,
+        "runtime_governance": info.get("runtime_governance"),
+        "live_render": False,
+        "note": (
+            "Campaign agent does not call video_compose.execute. "
+            "Live media must go through an OpenMontage pipeline with stage directors."
+        ),
+    }
 
 
 def _extract_completion(body: Any) -> str:
@@ -201,11 +321,70 @@ def default_inference(prompt: str, upstream: Callable[..., tuple[int, Any]]) -> 
 
 def _stage_prompt(stage: str, campaign: dict[str, Any]) -> str:
     return (
-        f"You are the Hermes {stage} agent on the hermes-flywheel orchestra. "
+        f"You are the Hermes video-campaign {stage} agent. "
         f"Niche: {campaign.get('niche')}. Goal: {campaign.get('goal')}. "
+        f"Brief: {campaign.get('brief') or '(none)'}. "
         f"Platforms: {campaign.get('platforms')}. "
         "Reply in 2 short sentences with a concrete next action. No markdown."
     )
+
+
+def _set_cuts_status(campaign: dict[str, Any], status: str, *, extra: dict[str, Any] | None = None) -> None:
+    cuts = campaign.get("cuts")
+    if not isinstance(cuts, list):
+        return
+    for cut in cuts:
+        if not isinstance(cut, dict):
+            continue
+        cut["status"] = status
+        if extra:
+            cut.update(extra)
+
+
+def _run_tool_stage(stage: str, campaign: dict[str, Any], used_dry: bool) -> str:
+    dry = used_dry or campaign.get("mode") == "dry_run"
+    if stage == "plan":
+        cuts = plan_cuts(campaign, dry=dry)
+        campaign["cuts"] = cuts
+        return f"Planned {len(cuts)} cuts ({'DRY-RUN' if dry else 'live-plan'})."
+    if stage == "route":
+        if dry:
+            _set_cuts_status(campaign, "routed_dry", extra={"label": "DRY-RUN"})
+            campaign["routing"] = {"live_generate": False, "healed": True}
+            return _simulated_artifact("route", campaign)
+        ranking = rank_video_tools(
+            f"{campaign.get('niche')} {campaign.get('goal')} {campaign.get('brief') or ''} vertical short"
+        )
+        if live_media_enabled():
+            ranking["pipeline_gate"] = (
+                "HERMES_CAMPAIGN_LIVE_MEDIA is on, but this agent will not call "
+                "video_selector generate. Use an OpenMontage pipeline for media."
+            )
+        campaign["routing"] = ranking
+        _set_cuts_status(
+            campaign,
+            "routed",
+            extra={"tool": ranking.get("top_tool"), "label": "rank-only"},
+        )
+        return (
+            f"video_selector rank: top={ranking.get('top_tool')} "
+            f"({ranking.get('ranked')} tools). No generate."
+        )
+    if stage == "compose":
+        if dry:
+            _set_cuts_status(campaign, "dry_run_complete", extra={"label": "DRY-RUN"})
+            campaign["compose"] = {"live_render": False, "healed": True}
+            return _simulated_artifact("compose", campaign)
+        plan = compose_runtime_plan()
+        campaign["compose"] = plan
+        _set_cuts_status(
+            campaign,
+            "compose_planned",
+            extra={"label": "pipeline-gated"},
+        )
+        engines = plan.get("render_engines") or {}
+        return f"video_compose get_info engines={engines}. No execute/render."
+    raise RuntimeError(f"not a tool stage: {stage}")
 
 
 async def run_orchestra(
@@ -214,21 +393,26 @@ async def run_orchestra(
     infer: Callable[[str], str] | None = None,
     sleep: Callable[[float], Any] | None = None,
 ) -> dict[str, Any]:
-    """Run flywheel stages with retries. Inference failure self-heals to dry-run."""
+    """Run video-campaign stages with retries. Failures self-heal to labeled dry-run."""
     waiter = sleep or asyncio.sleep
     campaign = get_campaign(campaign_id)
     if campaign is None:
         raise KeyError(campaign_id)
     campaign["status"] = "running"
     campaign["mode"] = "live"
+    campaign["agent"] = "video-campaign"
+    campaign["pipeline"] = "hermes-video-campaign"
     campaign = _append_event(
         campaign,
         {
             "type": "orchestra_started",
-            "message": "Launching agent orchestra (hermes-flywheel).",
+            "message": "Launching video-campaign agent (plan cuts → video_selector rank → compose plan).",
             "label": "live",
+            "agent": "video-campaign",
         },
     )
+
+    tool_stages = {"plan", "route", "compose"}
 
     for stage, agent, flywheel_stage in ORCHESTRA_STAGES:
         campaign = get_campaign(campaign_id) or campaign
@@ -251,7 +435,14 @@ async def run_orchestra(
 
         for attempt in range(1, attempts + 1):
             if used_dry:
-                result_text = _simulated_artifact(stage, campaign)
+                if stage == "plan":
+                    campaign["cuts"] = plan_cuts(campaign, dry=True)
+                elif stage in {"route", "compose"}:
+                    result_text = _run_tool_stage(stage, campaign, True)
+                else:
+                    result_text = _simulated_artifact(stage, campaign)
+                if stage == "plan":
+                    result_text = _simulated_artifact("plan", campaign)
                 campaign = _append_event(
                     campaign,
                     {
@@ -265,6 +456,25 @@ async def run_orchestra(
                 )
                 break
             try:
+                if stage in tool_stages:
+                    result_text = await asyncio.to_thread(_run_tool_stage, stage, campaign, False)
+                    event_type = {
+                        "plan": "cuts_planned",
+                        "route": "video_ranked",
+                        "compose": "compose_planned",
+                    }[stage]
+                    campaign = _append_event(
+                        campaign,
+                        {
+                            "type": event_type,
+                            "stage": stage,
+                            "agent": agent,
+                            "attempt": attempt,
+                            "label": "live",
+                            "message": result_text,
+                        },
+                    )
+                    break
                 if infer is None:
                     raise RuntimeError("no inference function bound")
                 result_text = await asyncio.to_thread(infer, _stage_prompt(stage, campaign))
@@ -299,7 +509,13 @@ async def run_orchestra(
                 used_dry = True
                 campaign["mode"] = "dry_run"
                 campaign["healed"] = True
-                result_text = _simulated_artifact(stage, campaign)
+                if stage == "plan":
+                    campaign["cuts"] = plan_cuts(campaign, dry=True)
+                    result_text = _simulated_artifact("plan", campaign)
+                elif stage in tool_stages:
+                    result_text = _run_tool_stage(stage, campaign, True)
+                else:
+                    result_text = _simulated_artifact(stage, campaign)
                 campaign = _append_event(
                     campaign,
                     {
@@ -309,8 +525,8 @@ async def run_orchestra(
                         "label": "DRY-RUN",
                         "error": last_error[:400],
                         "message": (
-                            "Inference unavailable after retries. "
-                            "Self-healed to labeled dry-run orchestra; cycle will complete."
+                            "Stage unavailable after retries. "
+                            "Self-healed to labeled dry-run video campaign; cycle will complete."
                         ),
                     },
                 )
@@ -333,6 +549,12 @@ async def run_orchestra(
 
     campaign = get_campaign(campaign_id) or campaign
     healed = bool(campaign.get("healed"))
+    if campaign.get("cuts"):
+        _set_cuts_status(
+            campaign,
+            "dry_run_complete" if healed else "ready",
+            extra={"label": "DRY-RUN" if healed else "queued"},
+        )
     campaign["status"] = "completed_healed" if healed else "completed"
     campaign["stage"] = "done"
     campaign = _append_event(
@@ -341,10 +563,12 @@ async def run_orchestra(
             "type": "orchestra_completed",
             "label": "DRY-RUN" if healed else "live",
             "healed": healed,
+            "agent": "video-campaign",
+            "cuts": len(campaign.get("cuts") or []),
             "message": (
-                "Campaign cycle complete (self-healed dry-run)."
+                "Video campaign complete (self-healed dry-run cuts)."
                 if healed
-                else "Campaign cycle complete with live inference."
+                else "Video campaign complete: cuts planned, tools ranked, compose gated."
             ),
         },
     )
