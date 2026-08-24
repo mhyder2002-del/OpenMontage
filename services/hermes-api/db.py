@@ -93,6 +93,32 @@ def _schema_sql() -> tuple[str, ...]:
             updated_at TEXT NOT NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS walking_scripts (
+            id TEXT PRIMARY KEY,
+            topic TEXT NOT NULL,
+            audience TEXT NOT NULL,
+            script TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS walking_storyboards (
+            id TEXT PRIMARY KEY,
+            script_id TEXT NOT NULL,
+            scenes TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS walking_thumbnails (
+            id TEXT PRIMARY KEY,
+            script_id TEXT NOT NULL,
+            storyboard_id TEXT NOT NULL,
+            thumbnail_url TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """,
     )
 
 
@@ -289,6 +315,173 @@ def list_knowledge_nodes() -> list[dict[str, Any]]:
                 }
             )
     return out
+
+
+def upsert_walking_script(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO walking_scripts (id, topic, audience, script, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                topic = excluded.topic,
+                audience = excluded.audience,
+                script = excluded.script,
+                created_at = excluded.created_at
+            """,
+            (
+                str(row["id"]),
+                str(row.get("topic") or ""),
+                str(row.get("audience") or ""),
+                str(row.get("script") or ""),
+                str(row.get("created_at") or _now_iso()),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return row
+
+
+def get_walking_script(script_id: str) -> dict[str, Any] | None:
+    ensure_db()
+    sid = str(script_id or "")
+    if not sid:
+        return None
+    db = connect()
+    try:
+        row = db.execute(
+            "SELECT id, topic, audience, script, created_at FROM walking_scripts WHERE id = ?",
+            (sid,),
+        ).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    if hasattr(row, "keys"):
+        return {k: row[k] for k in row.keys()}
+    return {
+        "id": row[0],
+        "topic": row[1],
+        "audience": row[2],
+        "script": row[3],
+        "created_at": row[4],
+    }
+
+
+def upsert_walking_storyboard(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    scenes = row.get("scenes")
+    payload = json.dumps(scenes if isinstance(scenes, list) else [])
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO walking_storyboards (id, script_id, scenes, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                script_id = excluded.script_id,
+                scenes = excluded.scenes,
+                created_at = excluded.created_at
+            """,
+            (
+                str(row["id"]),
+                str(row.get("script_id") or ""),
+                payload,
+                str(row.get("created_at") or _now_iso()),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return row
+
+
+def get_walking_storyboard(storyboard_id: str) -> dict[str, Any] | None:
+    ensure_db()
+    sid = str(storyboard_id or "")
+    if not sid:
+        return None
+    db = connect()
+    try:
+        row = db.execute(
+            "SELECT id, script_id, scenes, created_at FROM walking_storyboards WHERE id = ?",
+            (sid,),
+        ).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    if hasattr(row, "keys"):
+        item = {k: row[k] for k in row.keys()}
+    else:
+        item = {"id": row[0], "script_id": row[1], "scenes": row[2], "created_at": row[3]}
+    raw = item.get("scenes")
+    if isinstance(raw, str):
+        try:
+            item["scenes"] = json.loads(raw)
+        except json.JSONDecodeError:
+            item["scenes"] = []
+    return item
+
+
+def upsert_walking_thumbnail(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO walking_thumbnails (id, script_id, storyboard_id, thumbnail_url, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                script_id = excluded.script_id,
+                storyboard_id = excluded.storyboard_id,
+                thumbnail_url = excluded.thumbnail_url,
+                created_at = excluded.created_at
+            """,
+            (
+                str(row["id"]),
+                str(row.get("script_id") or ""),
+                str(row.get("storyboard_id") or ""),
+                str(row.get("thumbnail_url") or ""),
+                str(row.get("created_at") or _now_iso()),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return row
+
+
+def get_walking_thumbnail(thumbnail_id: str) -> dict[str, Any] | None:
+    ensure_db()
+    tid = str(thumbnail_id or "")
+    if not tid:
+        return None
+    db = connect()
+    try:
+        row = db.execute(
+            """
+            SELECT id, script_id, storyboard_id, thumbnail_url, created_at
+            FROM walking_thumbnails WHERE id = ?
+            """,
+            (tid,),
+        ).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    if hasattr(row, "keys"):
+        return {k: row[k] for k in row.keys()}
+    return {
+        "id": row[0],
+        "script_id": row[1],
+        "storyboard_id": row[2],
+        "thumbnail_url": row[3],
+        "created_at": row[4],
+    }
 
 
 def reset_migrate_flag() -> None:

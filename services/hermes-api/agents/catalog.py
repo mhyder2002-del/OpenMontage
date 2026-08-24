@@ -88,9 +88,9 @@ CATEGORIES: tuple[CategorySpec, ...] = (
     CategorySpec(
         "command",
         "Command Center",
-        "Report gateway health: livez, readyz, inference backend, origin 8091.",
-        "One line: origin, inference backend, and whether the process is live.",
-        "Command DRY-RUN: origin http://127.0.0.1:8091 · lm_studio · livez ok.",
+        "Report gateway health: livez, readyz, /health origin, /api/flywheel origin. Production origin is https://hermestudios.com. 503 readyz means auth not configured — wait, do not clobber VPS deploy.",
+        "One line: HTTP codes for livez/readyz/health/console/flywheel plus advertised origin. No keys.",
+        "Command DRY-RUN: origin https://hermestudios.com (local 8091 ok) · lm_studio · livez 200 · readyz 503 if key unset.",
     ),
     CategorySpec(
         "publishing",

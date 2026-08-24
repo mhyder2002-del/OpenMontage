@@ -55,6 +55,14 @@ from agents.orchestrator import snapshot_category as agents_snapshot_category
 from agents.orchestrator import tick_all as agents_tick_all
 from db import list_knowledge_nodes
 from research import run_research
+from walking_skeleton import (
+    GenerateScriptRequest,
+    GenerateStoryboardRequest,
+    GenerateThumbnailRequest,
+    create_script,
+    create_storyboard,
+    create_thumbnail,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_LM_STUDIO = "http://127.0.0.1:1234/v1"
@@ -596,6 +604,40 @@ def _research_infer() -> Any:
         )
 
     return _infer
+
+
+@app.post("/api/v1/scripts")
+async def api_v1_scripts(
+    body: GenerateScriptRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    result = create_script(body.topic, body.audience, infer=_research_infer())
+    return result.model_dump()
+
+
+@app.post("/api/v1/storyboards")
+async def api_v1_storyboards(
+    body: GenerateStoryboardRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    result = create_storyboard(body.script_id, infer=_research_infer())
+    if result is None:
+        raise HTTPException(status_code=404, detail="Script not found")
+    return result.model_dump()
+
+
+@app.post("/api/v1/thumbnails")
+async def api_v1_thumbnails(
+    body: GenerateThumbnailRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    result = create_thumbnail(body.script_id, body.storyboard_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Script or storyboard not found")
+    return result.model_dump()
 
 
 @app.post("/api/agent/research")

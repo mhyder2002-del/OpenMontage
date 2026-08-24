@@ -454,6 +454,7 @@ def test_console_pages_bind_every_category_agent():
     assert "COPY agents ./agents" in dockerfile
     assert "db.py" in dockerfile
     assert "research.py" in dockerfile
+    assert "walking_skeleton.py" in dockerfile
     assert "moneyprinter.py" in dockerfile
     assert "/readyz" in dockerfile
     assert "/api/knowledge/nodes" in os_js
@@ -559,6 +560,7 @@ def test_mutating_api_auth_503_vs_401(monkeypatch, tmp_path):
     assert http.post("/api/campaigns", json={"niche": "x", "launch": False}).status_code == 503
     assert http.post("/api/flywheel/start").status_code == 503
     assert http.post("/api/agents/tick").status_code == 503
+    assert http.post("/api/v1/scripts", json={"topic": "AI", "audience": "devs"}).status_code == 503
 
     token = "unit-test-bearer"
     monkeypatch.setenv("HERMES_API_KEY", token)
@@ -574,6 +576,74 @@ def test_mutating_api_auth_503_vs_401(monkeypatch, tmp_path):
     )
     assert created.status_code == 200
     assert created.json()["id"]
+    assert http.post("/api/v1/scripts", json={"topic": "AI", "audience": "devs"}).status_code == 401
+    scripts = http.post(
+        "/api/v1/scripts",
+        json={"topic": "AI", "audience": "devs"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert scripts.status_code == 200
+
+
+def test_walking_skeleton_round_trip_and_research_shape(client):
+    http, _ = client
+    missing = http.post("/api/v1/storyboards", json={"script_id": "does-not-exist"})
+    assert missing.status_code == 404
+    scripts = http.post("/api/v1/scripts", json={"topic": "AI", "audience": "founders"})
+    assert scripts.status_code == 200
+    script_body = scripts.json()
+    assert script_body["script_id"]
+    assert script_body["script"]
+    assert script_body["timestamp"]
+    assert "trend" not in script_body
+    boards = http.post("/api/v1/storyboards", json={"script_id": script_body["script_id"]})
+    assert boards.status_code == 200
+    board_body = boards.json()
+    assert board_body["storyboard_id"]
+    assert len(board_body["scenes"]) == 3
+    thumbs = http.post(
+        "/api/v1/thumbnails",
+        json={"script_id": script_body["script_id"], "storyboard_id": board_body["storyboard_id"]},
+    )
+    assert thumbs.status_code == 200
+    thumb_body = thumbs.json()
+    assert thumb_body["thumbnail_id"]
+    assert thumb_body["thumbnail_url"] == "/static/placeholders/walking-skeleton.svg"
+    assert "example.com" not in thumb_body["thumbnail_url"]
+    mismatched = http.post(
+        "/api/v1/thumbnails",
+        json={"script_id": script_body["script_id"], "storyboard_id": "missing-board"},
+    )
+    assert mismatched.status_code == 404
+    research = http.post("/api/agent/research", json={"topic": "AI"})
+    assert research.status_code == 200
+    research_body = research.json()
+    assert research_body["topic"] == "AI"
+    assert "trend" in research_body
+    assert "node" in research_body
+    assert "script_id" not in research_body
+    placeholder = http.get("/static/placeholders/walking-skeleton.svg")
+    assert placeholder.status_code == 200
+
+
+def test_endpoints_json_unique_and_includes_walking_skeleton():
+    catalog = json.loads((APP_DIR / "endpoints.json").read_text(encoding="utf-8"))
+    keys = [(row["method"], row["path"]) for row in catalog]
+    assert len(keys) == len(set(keys))
+    assert ("POST", "/api/v1/scripts") in keys
+    assert ("POST", "/api/v1/storyboards") in keys
+    assert ("POST", "/api/v1/thumbnails") in keys
+    assert ("POST", "/api/agent/research") in keys
+    assert ("GET", "/health") in keys
+    module = _load_app()
+    live = {
+        (method, route.path)
+        for route in module.app.routes
+        if hasattr(route, "methods") and hasattr(route, "path")
+        for method in (route.methods or set())
+        if method not in {"HEAD", "OPTIONS"}
+    }
+    assert set(keys) <= live
 
 
 def test_flywheel_origin_from_public_domain(monkeypatch, tmp_path):
