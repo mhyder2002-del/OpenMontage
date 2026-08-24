@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 from billing import public_origin
 from campaigns import create_campaign, list_campaigns
 
-_DEFAULT_STORE = Path(__file__).resolve().parent / "data" / "flywheel.json"
+_DEFAULT_STORE = Path(__file__).resolve().parent / "data" / "flywheel.json"  # Docker volume: /app/data
 
 
 def advertised_origin() -> str:

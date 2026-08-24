@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import Any
+from typing import Any, Callable
 
-from .catalog import CATEGORIES, get_spec
+from .catalog import CATEGORIES, CategorySpec, get_spec
 from .runner import run_spec
 from .store import load, record_tick_meta
 
@@ -60,11 +60,56 @@ def snapshot_category(category: str) -> dict[str, Any] | None:
     }
 
 
+def _runner_for(spec: CategorySpec) -> Callable[[], dict[str, Any]]:
+    """Dispatch to the category module's run() (e.g. publishing._mpt_note)."""
+    from . import (
+        analytics,
+        campaigns_agent,
+        command,
+        debugger,
+        discovery,
+        evolution,
+        knowledge,
+        memory,
+        orchestra,
+        overview,
+        publishing,
+        settings,
+        studio,
+        uploads,
+    )
+
+    mapping: dict[str, Callable[[], dict[str, Any]]] = {
+        "overview": overview.run,
+        "discovery": discovery.run,
+        "knowledge": knowledge.run,
+        "campaigns": campaigns_agent.run,
+        "orchestra": orchestra.run,
+        "debugger": debugger.run,
+        "studio": studio.run,
+        "evolution": evolution.run,
+        "analytics": analytics.run,
+        "memory": memory.run,
+        "command": command.run,
+        "publishing": publishing.run,
+        "uploads": uploads.run,
+        "settings": settings.run,
+    }
+    return mapping.get(spec.id, lambda: run_spec(spec))
+
+
+def run_category(spec: CategorySpec) -> dict[str, Any]:
+    try:
+        return _runner_for(spec)()
+    except Exception:
+        return run_spec(spec)
+
+
 def tick_one(category: str) -> dict[str, Any]:
     spec = get_spec(category)
     if spec is None:
         return {"ok": False, "error": "unknown_category", "id": category}
-    return run_spec(spec)
+    return run_category(spec)
 
 
 async def tick_all() -> dict[str, Any]:
@@ -72,9 +117,9 @@ async def tick_all() -> dict[str, Any]:
     sem = asyncio.Semaphore(max_concurrency())
     results: list[dict[str, Any]] = []
 
-    async def one(spec):
+    async def one(spec: CategorySpec):
         async with sem:
-            return await asyncio.to_thread(run_spec, spec)
+            return await asyncio.to_thread(run_category, spec)
 
     gathered = await asyncio.gather(*(one(spec) for spec in CATEGORIES), return_exceptions=True)
     for spec, item in zip(CATEGORIES, gathered):

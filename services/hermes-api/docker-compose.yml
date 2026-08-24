@@ -19,12 +19,12 @@ services:
       HERMES_INFLIGHT_WAIT_SECONDS: ${HERMES_INFLIGHT_WAIT_SECONDS:-5}
       HERMES_FLYWHEEL_AUTO: ${HERMES_FLYWHEEL_AUTO:-false}
       HERMES_FLYWHEEL_SLEEP_SECONDS: ${HERMES_FLYWHEEL_SLEEP_SECONDS:-0.25}
-      HERMES_FLYWHEEL_STORE: ${HERMES_FLYWHEEL_STORE:-}
-      HERMES_AGENTS_STORE: ${HERMES_AGENTS_STORE:-}
+      HERMES_FLYWHEEL_STORE: ${HERMES_FLYWHEEL_STORE:-/app/data/flywheel.json}
+      HERMES_AGENTS_STORE: ${HERMES_AGENTS_STORE:-/app/data/agents.json}
       HERMES_AGENT_CONCURRENCY: ${HERMES_AGENT_CONCURRENCY:-3}
       HERMES_AGENT_INFER_TIMEOUT: ${HERMES_AGENT_INFER_TIMEOUT:-8}
-      HERMES_CAMPAIGN_STORE: ${HERMES_CAMPAIGN_STORE:-}
-      HERMES_DB_PATH: ${HERMES_DB_PATH:-}
+      HERMES_CAMPAIGN_STORE: ${HERMES_CAMPAIGN_STORE:-/app/data/campaigns.json}
+      HERMES_DB_PATH: ${HERMES_DB_PATH:-/app/data/hermes.db}
       DATABASE_URL: ${DATABASE_URL:-}
       HERMES_RESEARCH_TIMEOUT: ${HERMES_RESEARCH_TIMEOUT:-4}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
@@ -36,7 +36,7 @@ services:
       STRIPE_PRICE_INFERENCE_METER: ${STRIPE_PRICE_INFERENCE_METER:-}
       STRIPE_METER_EVENT_NAME: ${STRIPE_METER_EVENT_NAME:-}
       STRIPE_AUTOMATIC_TAX: ${STRIPE_AUTOMATIC_TAX:-false}
-      HERMES_BILLING_STORE: ${HERMES_BILLING_STORE:-}
+      HERMES_BILLING_STORE: ${HERMES_BILLING_STORE:-/app/data/billing.json}
       MONEYPRINTER_ENABLED: ${MONEYPRINTER_ENABLED:-false}
       MONEYPRINTER_BASE_URL: ${MONEYPRINTER_BASE_URL:-http://moneyprinter:8080}
       MONEYPRINTER_API_KEY: ${MONEYPRINTER_API_KEY:-}
@@ -45,13 +45,15 @@ services:
       PYTHONUNBUFFERED: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - hermes_data:/app/data
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/livez', timeout=2)",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/readyz', timeout=2)",
         ]
       interval: 15s
       timeout: 5s
@@ -93,5 +95,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  hermes_data:
   caddy_data:
   caddy_config:

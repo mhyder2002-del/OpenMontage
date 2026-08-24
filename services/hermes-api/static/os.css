@@ -137,6 +137,11 @@ button, .btn {
   padding: 0.22rem 0.65rem;
   font-size: 0.8rem;
 }
+button.pill {
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
 .pill.on { background: var(--mint); color: #06110c; border-color: transparent; }
 .row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 0; border-bottom: 1px solid var(--line); }
 .row:last-child { border-bottom: 0; }

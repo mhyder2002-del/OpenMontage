@@ -32,6 +32,43 @@ const SUB = {
   settings: "Domain, auth, and defaults",
 };
 
+const API_KEY_STORAGE = "hermes-api-key";
+
+function getApiKey() {
+  try {
+    return sessionStorage.getItem(API_KEY_STORAGE) || "";
+  } catch {
+    return "";
+  }
+}
+
+function setApiKey(value) {
+  try {
+    const trimmed = String(value || "").trim();
+    if (trimmed) sessionStorage.setItem(API_KEY_STORAGE, trimmed);
+    else sessionStorage.removeItem(API_KEY_STORAGE);
+  } catch {
+    /* private mode */
+  }
+}
+
+function authHeaders(extra) {
+  const headers = { ...(extra || {}) };
+  const key = getApiKey();
+  if (key) headers.Authorization = `Bearer ${key}`;
+  return headers;
+}
+
+function apiFetch(url, options) {
+  const opts = options || {};
+  const method = String(opts.method || "GET").toUpperCase();
+  const mutating = method !== "GET" && method !== "HEAD";
+  const locked = mutating || String(url).startsWith("/v1/");
+  const headers = { ...(opts.headers || {}) };
+  if (locked) Object.assign(headers, authHeaders(headers));
+  return fetch(url, { ...opts, headers });
+}
+
 const TOPICS = [
   ["Automation", "0.51", "0.82", "0.70", "0.82"],
   ["Claude", "0.44", "0.79", "0.74", "0.86"],
@@ -70,9 +107,9 @@ const PAGES = {
         ${card("Publishing queue", "14", "Scheduled")}
         ${card("AI confidence", "0.91", "Prediction gate")}
         ${card("Opportunities", "37", "High velocity")}
-        ${card("Knowledge nodes", "5", "Living graph")}
+        ${card("Knowledge nodes", "<span id=\"kg-node-count\">—</span>", "Living graph")}
         ${card("Flywheel cycles", "—", "Live /api/flywheel", true, true)}
-        ${card("Agents online", "15", "Orchestra ready")}
+        ${card("Agents online", "14", "Orchestra ready")}
         ${card("Channel health", "Strong", "Growth forecast ↑")}
       </div>
       <div class="grid cols-2" style="margin-top:0.75rem">
@@ -102,16 +139,17 @@ const PAGES = {
       <article class="card">
         <strong>AI opportunity scan</strong>
         <div class="pills" style="margin:0.7rem 0">
-          <span class="pill on">YouTube</span><span class="pill">Reddit</span><span class="pill">TikTok</span>
-          <span class="pill">Google Trends</span><span class="pill">X</span><span class="pill">News</span><span class="pill">Competitors</span>
+          ${["YouTube","Reddit","TikTok","Google Trends","X","News","Competitors"].map((c, i) =>
+            `<button type="button" class="pill${i < 4 ? " on" : ""}" data-research="${c}">${c}</button>`
+          ).join("")}
         </div>
-        <p class="hint">Hermes continuously scans the open web for high-opportunity topics — not a single YouTube search.</p>
+        <p class="hint" id="research-status">Chip a source to POST /api/agent/research.</p>
       </article>
       <div class="grid cols-4" style="margin-top:0.75rem">
-        ${card("Trending", "9", "High velocity")}
-        ${card("Emerging", "4", "Early signal")}
-        ${card("Low competition", "5", "Whitespace")}
-        ${card("Avg virality", "0.78", "Predicted", true, true)}
+        ${card("Trending", "<span id=\"disc-trending\">—</span>", "Stored nodes")}
+        ${card("Emerging", "<span id=\"disc-emerging\">—</span>", "Research source")}
+        ${card("Low competition", "<span id=\"disc-open\">—</span>", "Whitespace")}
+        ${card("Avg virality", "<span id=\"disc-viral\">—</span>", "From graph", true, true)}
       </div>
       <article class="card" style="margin-top:0.75rem">
         <strong>High-opportunity topics</strong>
@@ -122,9 +160,9 @@ const PAGES = {
     return `
       <p class="hint" id="agent-feed">Loading /api/agents/knowledge…</p>
       <div class="grid cols-3">
-        ${card("Nodes", "—", "Living graph")}
-        ${card("Relations", "—", "Causal edges")}
-        ${card("Feedback loops", "Active", "Analytics → Memory", true, true)}
+        ${card("Nodes", "<span id=\"kg-node-count\">—</span>", "GET /api/knowledge/nodes")}
+        ${card("Relations", "<span id=\"kg-rel-count\">—</span>", "Distinct sources")}
+        ${card("Feedback loops", "<span id=\"kg-loops\">—</span>", "Analytics → Memory", true, true)}
       </div>
       <article class="card" style="margin-top:0.75rem">
         <strong>Living knowledge graph</strong>
@@ -166,7 +204,7 @@ const PAGES = {
       <p class="hint" id="agent-feed">Loading /api/agents/orchestra…</p>
       <div class="grid cols-4">
         ${card("CEO", "Hermes OS Orchestrator", "Orchestrator")}
-        ${card("Agents", "15", "OS + kernel")}
+        ${card("Agents", "14", "OS + kernel")}
         ${card("Healthy", "98%", "Runtime health", true, true)}
         ${card("Platform", "hermestudios.com", "Reliability layer")}
       </div>
@@ -195,7 +233,7 @@ const PAGES = {
       <article class="card" style="margin-top:0.75rem">
         <strong>Probe inference</strong>
         <div style="display:flex;gap:0.5rem;margin-top:0.8rem;flex-wrap:wrap">
-          <button type="button" class="primary" id="probe">Run /api/ai/complete probe</button>
+          <button type="button" class="primary" id="probe">Run debugger probe</button>
           <button type="button" class="ghost" id="refresh-health">Refresh</button>
         </div>
         <pre class="hint" id="probe-out" style="margin-top:0.8rem;white-space:pre-wrap"></pre>
@@ -229,7 +267,8 @@ const PAGES = {
   },
   command() {
     return `<p class="hint" id="agent-feed">Loading /api/agents/command…</p>
-      <article class="card"><strong>Command Center</strong><p class="hint" id="cmd-health">Loading /health…</p><p class="hint">OpenAI-compatible /v1 on hermestudios.com. Bearer HERMES_API_KEY.</p></article>`;
+      <article class="card"><strong>/readyz</strong><pre class="hint" id="readyz-pre" style="white-space:pre-wrap">checking…</pre></article>
+      <article class="card" style="margin-top:0.75rem"><strong>/health</strong><p class="hint" id="cmd-health">Loading /health…</p><p class="hint">GET /health stays public without a key. Bearer HERMES_API_KEY on locked /v1.</p></article>`;
   },
   publishing() {
     return `<article class="card"><strong>Publishing agent</strong><p class="hint" id="agent-feed">Loading /api/agents/publishing…</p><p class="hint">14 scheduled. Last: 4 Shorts — YouTube + TikTok.</p></article>`;
@@ -238,7 +277,16 @@ const PAGES = {
     return `<article class="card"><strong>Uploads agent</strong><p class="hint" id="agent-feed">Loading /api/agents/uploads…</p><p class="hint">Drop references here. Binary YouTube upload stays on the studio Mac CLI.</p></article>`;
   },
   settings() {
-    return `<article class="card"><strong>Settings</strong><p class="hint" id="agent-feed">Loading /api/agents/settings…</p><p class="hint">Domain hermestudios.com · auth required on /v1 · inference via vLLM or studio fallback.</p>
+    return `<article class="card"><strong>Settings</strong><p class="hint" id="agent-feed">Loading /api/agents/settings…</p>
+      <p class="hint">API key lives in sessionStorage (<code>hermes-api-key</code>) only. Sent as Authorization Bearer on mutating and locked /v1 fetches.</p>
+      <form id="api-key-form">
+        <div class="field"><label for="api-key-input">HERMES_API_KEY</label><input id="api-key-input" type="password" autocomplete="off" placeholder="Paste key for this tab" /></div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+          <button type="submit" class="primary">Save for this session</button>
+          <button type="button" class="ghost" id="api-key-clear">Clear</button>
+        </div>
+      </form>
+      <p class="hint" id="api-key-status" style="margin-top:0.6rem"></p>
       <p class="hint" id="billing-status" style="margin-top:0.7rem">Loading Stripe…</p>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.7rem">
         <button type="button" class="primary" data-pay="campaign_launch">Pay campaign launch</button>
@@ -276,7 +324,7 @@ function wire(id) {
         if (input) fields[id] = input.value;
       });
       try {
-        const r = await fetch("/api/campaigns", {
+        const r = await apiFetch("/api/campaigns", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...fields, launch: true, agent: "video-campaign" }),
@@ -324,20 +372,23 @@ function wire(id) {
   }
   const refresh = document.getElementById("refresh-health");
   if (refresh) refresh.addEventListener("click", runProbe);
-  if (id === "command") loadHealth("cmd-health");
+  if (id === "command") loadHealth();
+  if (id === "settings") paintApiKeyStatus();
   if (id === "settings" || id === "overview" || id === "evolution") loadBilling();
   if (id === "overview" || id === "evolution") loadFlywheel();
-  if (id === "discovery" || id === "knowledge") loadKnowledge();
+  if (id === "overview" || id === "discovery" || id === "knowledge") loadKnowledge();
   loadAgent(id);
   bindBilling();
+  bindSettings();
+  bindResearch();
   const fwStart = document.getElementById("flywheel-start");
   if (fwStart) fwStart.addEventListener("click", async () => {
-    await fetch("/api/flywheel/start", { method: "POST" });
+    await apiFetch("/api/flywheel/start", { method: "POST" });
     loadFlywheel();
   });
   const fwStop = document.getElementById("flywheel-stop");
   if (fwStop) fwStop.addEventListener("click", async () => {
-    await fetch("/api/flywheel/stop", { method: "POST" });
+    await apiFetch("/api/flywheel/stop", { method: "POST" });
     loadFlywheel();
   });
 }
@@ -358,11 +409,82 @@ function loadAgent(id) {
     .catch((e) => { if (el) el.textContent = String(e); });
 }
 
+function paintApiKeyStatus() {
+  const el = document.getElementById("api-key-status");
+  if (!el) return;
+  el.textContent = getApiKey()
+    ? "Key in sessionStorage (this tab only). Bearer sent on mutating / locked fetches."
+    : "No key stored. GET /health and console remain public.";
+}
+
+function bindSettings() {
+  const form = document.getElementById("api-key-form");
+  if (form) {
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = document.getElementById("api-key-input");
+      setApiKey(input && input.value);
+      if (input) input.value = "";
+      paintApiKeyStatus();
+    });
+  }
+  const clear = document.getElementById("api-key-clear");
+  if (clear) {
+    clear.addEventListener("click", () => {
+      setApiKey("");
+      const input = document.getElementById("api-key-input");
+      if (input) input.value = "";
+      paintApiKeyStatus();
+    });
+  }
+}
+
+function bindResearch() {
+  document.querySelectorAll("[data-research]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const topic = btn.getAttribute("data-research") || btn.textContent.trim();
+      const status = document.getElementById("research-status");
+      if (status) status.textContent = `POST /api/agent/research · ${topic}…`;
+      try {
+        const r = await apiFetch("/api/agent/research", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic }),
+        });
+        const data = await r.json();
+        if (status) {
+          status.textContent = r.ok
+            ? `Researched ${data.topic || topic} · ${data.trend || r.status}`
+            : `Research ${r.status}`;
+        }
+        loadKnowledge();
+      } catch (e) {
+        if (status) status.textContent = String(e);
+      }
+    });
+  });
+}
+
 function loadKnowledge() {
   fetch("/api/knowledge/nodes")
     .then((r) => r.json())
     .then((d) => {
       const nodes = d.nodes || [];
+      const count = d.count != null ? d.count : nodes.length;
+      const sources = new Set(nodes.map((n) => n.source).filter(Boolean));
+      document.querySelectorAll("#kg-node-count").forEach((el) => { el.textContent = String(count); });
+      const rel = document.getElementById("kg-rel-count");
+      if (rel) rel.textContent = String(sources.size);
+      const loops = document.getElementById("kg-loops");
+      if (loops) loops.textContent = count ? "Active" : "Idle";
+      const trending = document.getElementById("disc-trending");
+      if (trending) trending.textContent = String(count);
+      const emerging = document.getElementById("disc-emerging");
+      if (emerging) emerging.textContent = String(nodes.filter((n) => n.source === "research").length);
+      const open = document.getElementById("disc-open");
+      if (open) open.textContent = String(nodes.filter((n) => /low|open|white/i.test(String(n.trend || ""))).length);
+      const viral = document.getElementById("disc-viral");
+      if (viral) viral.textContent = count ? String(Math.min(0.99, 0.5 + count * 0.04).toFixed(2)) : "—";
       const list = document.getElementById("discovery-nodes");
       if (list) {
         if (!nodes.length) {
@@ -420,7 +542,7 @@ function bindBilling() {
   document.querySelectorAll("[data-pay]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const sku = btn.getAttribute("data-pay");
-      const r = await fetch("/api/billing/checkout", {
+      const r = await apiFetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sku }),
@@ -435,7 +557,7 @@ function bindBilling() {
   });
   document.querySelectorAll("[data-subscribe]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const r = await fetch("/api/billing/subscribe", {
+      const r = await apiFetch("/api/billing/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{}",
@@ -452,9 +574,17 @@ function bindBilling() {
 
 function runProbe() {
   const out = document.getElementById("probe-out");
-  if (out) out.textContent = "Calling /health…";
-  fetch("/health")
-    .then((r) => r.json())
+  const key = getApiKey();
+  if (out) out.textContent = key ? "Calling /v1/chat/completions…" : "Calling /health…";
+  const req = key
+    ? apiFetch("/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [{ role: "user", content: "ping" }], max_tokens: 8 }),
+      })
+    : fetch("/health");
+  req
+    .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }))
     .then((d) => {
       if (out) out.textContent = JSON.stringify(d, null, 2);
     })
@@ -463,13 +593,22 @@ function runProbe() {
     });
 }
 
-function loadHealth(elId) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  fetch("/health")
-    .then((r) => r.json())
-    .then((d) => { el.textContent = JSON.stringify(d, null, 2); })
-    .catch((e) => { el.textContent = String(e); });
+function loadHealth() {
+  async function paint(elId, path) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    try {
+      const r = await fetch(path);
+      const body = await r.json().catch(async () => await r.text());
+      el.textContent = typeof body === "string"
+        ? `${path} ${r.status}\n${body}`
+        : JSON.stringify({ path, status: r.status, ...body }, null, 2);
+    } catch (e) {
+      el.textContent = `${path} ${String(e)}`;
+    }
+  }
+  paint("readyz-pre", "/readyz");
+  paint("cmd-health", "/health");
 }
 
 function buildNav() {

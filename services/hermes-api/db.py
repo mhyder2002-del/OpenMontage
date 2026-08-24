@@ -184,6 +184,26 @@ def upsert_campaign_row(campaign: dict[str, Any]) -> None:
         db.close()
 
 
+def get_campaign_row(campaign_id: str) -> dict[str, Any] | None:
+    ensure_db()
+    cid = str(campaign_id or "")
+    if not cid:
+        return None
+    db = connect()
+    try:
+        row = db.execute("SELECT payload FROM campaigns WHERE id = ?", (cid,)).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    payload = row[0] if not hasattr(row, "keys") else row["payload"]
+    try:
+        item = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    return item if isinstance(item, dict) else None
+
+
 def list_campaign_rows() -> list[dict[str, Any]]:
     ensure_db()
     db = connect()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import sys
@@ -84,50 +83,45 @@ def _empty_db() -> dict[str, Any]:
 
 
 def load_db() -> dict[str, Any]:
-    path = store_path()
-    if not path.is_file():
-        return _empty_db()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return _empty_db()
-    if not isinstance(data, dict) or not isinstance(data.get("campaigns"), dict):
-        return _empty_db()
-    return data
+    """SQLite is source of truth; campaigns.json is migrated once via db.ensure_db."""
+    from db import list_campaign_rows
+
+    rows = list_campaign_rows()
+    campaigns = {str(item["id"]): item for item in rows if isinstance(item, dict) and item.get("id")}
+    return {"campaigns": campaigns}
 
 
 def save_db(db: dict[str, Any]) -> None:
-    path = store_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(db, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    from db import upsert_campaign_row
+
+    campaigns = db.get("campaigns") if isinstance(db, dict) else None
+    if not isinstance(campaigns, dict):
+        return
+    for item in campaigns.values():
+        if isinstance(item, dict) and item.get("id"):
+            upsert_campaign_row(item)
 
 
 def list_campaigns() -> list[dict[str, Any]]:
-    db = load_db()
-    items = list(db["campaigns"].values())
+    from db import list_campaign_rows
+
+    items = list_campaign_rows()
     items.sort(key=lambda c: float(c.get("updated_at") or 0), reverse=True)
     return items
 
 
 def get_campaign(campaign_id: str) -> dict[str, Any] | None:
-    db = load_db()
-    item = db["campaigns"].get(campaign_id)
+    from db import get_campaign_row
+
+    item = get_campaign_row(campaign_id)
     return item if isinstance(item, dict) else None
 
 
 def upsert_campaign(campaign: dict[str, Any]) -> dict[str, Any]:
-    db = load_db()
-    campaign["updated_at"] = _now()
-    db["campaigns"][campaign["id"]] = campaign
-    save_db(db)
-    try:
-        from db import upsert_campaign_row
+    from db import upsert_campaign_row
 
-        upsert_campaign_row(campaign)
-    except Exception:
-        pass
+    campaign["updated_at"] = _now()
+    upsert_campaign_row(campaign)
     return campaign
 
 
@@ -267,7 +261,17 @@ def _ensure_repo_on_path() -> None:
 def rank_video_tools(prompt: str) -> dict[str, Any]:
     """Registry rank only — never text_to_video generation from this agent."""
     _ensure_repo_on_path()
-    from tools.video.video_selector import VideoSelector
+    try:
+        from tools.video.video_selector import VideoSelector
+    except ImportError:
+        return {
+            "top_tool": "none",
+            "top_status": "unavailable",
+            "ranked": 0,
+            "explanation": "OpenMontage tools/ not present in this image; rank skipped.",
+            "live_generate": False,
+            "skipped": True,
+        }
 
     result = VideoSelector().execute(
         {
@@ -323,7 +327,16 @@ def apply_moneyprinter(campaign: dict[str, Any], *, force_dry: bool) -> str:
 
 def compose_runtime_plan() -> dict[str, Any]:
     _ensure_repo_on_path()
-    from tools.video.video_compose import VideoCompose
+    try:
+        from tools.video.video_compose import VideoCompose
+    except ImportError:
+        return {
+            "render_engines": {},
+            "runtime_governance": None,
+            "live_render": False,
+            "skipped": True,
+            "note": "OpenMontage tools/ not present in this image; compose plan skipped.",
+        }
 
     info = VideoCompose().get_info()
     engines = info.get("render_engines") or {}

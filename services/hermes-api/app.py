@@ -196,6 +196,12 @@ def _require_auth(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid bearer token")
 
 
+def _require_mutating_api_auth(authorization: str | None) -> None:
+    """Gate campaign/flywheel/agent mutations on locked production domains."""
+    if _production_locked():
+        _require_auth(authorization)
+
+
 def _get_inflight() -> asyncio.Semaphore:
     global _INFLIGHT
     if _INFLIGHT is None:
@@ -635,7 +641,9 @@ def api_discovery() -> dict[str, Any]:
 async def api_create_campaign(
     request: Request,
     background: BackgroundTasks,
+    authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
     try:
         raw = await request.json()
     except Exception:
@@ -650,7 +658,12 @@ async def api_create_campaign(
 
 
 @app.post("/api/campaigns/{campaign_id}/launch")
-def api_launch_campaign(campaign_id: str, background: BackgroundTasks) -> dict[str, Any]:
+def api_launch_campaign(
+    campaign_id: str,
+    background: BackgroundTasks,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
     campaign = _campaign_or_404(campaign_id)
     if campaign.get("status") in {"running"}:
         return campaign
@@ -671,7 +684,8 @@ def api_flywheel() -> dict[str, Any]:
 
 
 @app.post("/api/flywheel/start")
-async def api_flywheel_start() -> dict[str, Any]:
+async def api_flywheel_start(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
     snap = flywheel_start()
     _ensure_flywheel_task()
     return snap
@@ -679,7 +693,8 @@ async def api_flywheel_start() -> dict[str, Any]:
 
 @app.get("/api/flywheel/stop")
 @app.post("/api/flywheel/stop")
-def api_flywheel_stop() -> dict[str, Any]:
+def api_flywheel_stop(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
     return flywheel_stop()
 
 
@@ -697,7 +712,8 @@ def api_agent_category(category: str) -> dict[str, Any]:
 
 
 @app.post("/api/agents/tick")
-async def api_agents_tick() -> dict[str, Any]:
+async def api_agents_tick(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
     return await agents_tick_all()
 
 

@@ -32,6 +32,42 @@
   let inferences = 0;
   let pollTimer = 0;
   const CAMPAIGN_KEY = "hermes-active-campaign";
+  const API_KEY_STORAGE = "hermes-api-key";
+
+  function getApiKey() {
+    try {
+      return sessionStorage.getItem(API_KEY_STORAGE) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function setApiKey(value) {
+    try {
+      const trimmed = String(value || "").trim();
+      if (trimmed) sessionStorage.setItem(API_KEY_STORAGE, trimmed);
+      else sessionStorage.removeItem(API_KEY_STORAGE);
+    } catch {
+      /* private mode */
+    }
+  }
+
+  function authHeaders(extra) {
+    const headers = { ...(extra || {}) };
+    const key = getApiKey();
+    if (key) headers.Authorization = `Bearer ${key}`;
+    return headers;
+  }
+
+  function apiFetch(url, options) {
+    const opts = options || {};
+    const method = String(opts.method || "GET").toUpperCase();
+    const mutating = method !== "GET" && method !== "HEAD";
+    const locked = mutating || String(url).startsWith("/v1/");
+    const headers = { ...(opts.headers || {}) };
+    if (locked) Object.assign(headers, authHeaders(headers));
+    return fetch(url, { ...opts, headers });
+  }
 
   const topics = [
     { name: "Automation", competition: 0.5, velocity: 0.82, viral: 0.7, conf: 0.82 },
@@ -91,9 +127,9 @@
           ${metric("Publishing Queue", "14", "Scheduled")}
           ${metric("AI Confidence", "0.91", "Prediction gate")}
           ${metric("Opportunities", "37", "High velocity")}
-          ${metric("Knowledge Nodes", "5", "Living graph")}
+          ${metric("Knowledge Nodes", "<span id=\"kg-node-count\">—</span>", "Living graph")}
           ${metric("Flywheel cycles", "<span id=\"flywheel-cycles\">—</span>", "Live self-check ticks")}
-          ${metric("Agents Online", "15", "Orchestra ready")}
+          ${metric("Agents Online", "14", "Orchestra ready")}
           ${metric("Channel Health", "Strong", "Growth forecast ↑")}
         </div>
         <p class="muted" id="agent-feed" style="margin-top:0.75rem">Loading /api/agents/overview…</p>
@@ -112,14 +148,14 @@
         <p class="muted" id="agent-feed">Loading /api/agents/discovery…</p>
         <section class="card">
           <h2>AI opportunity scan</h2>
-          <div class="chips">${["YouTube","Reddit","TikTok","Google Trends","X","News","Competitors"].map((c,i)=>`<button type="button" class="chip${i<4?" on":""}">${c}</button>`).join("")}</div>
-          <p class="muted">Hermes continuously scans the open web for high-opportunity topics — not a single YouTube search.</p>
+          <div class="chips">${["YouTube","Reddit","TikTok","Google Trends","X","News","Competitors"].map((c,i)=>`<button type="button" class="chip${i<4?" on":""}" data-research="${c}">${c}</button>`).join("")}</div>
+          <p class="muted" id="research-status">Chip a source to POST /api/agent/research. GET health stays public without a key.</p>
         </section>
         <div class="grid metrics" style="margin-top:0.75rem">
-          ${metric("Trending", "9", "High velocity")}
-          ${metric("Emerging", "4", "Early signal")}
-          ${metric("Low Competition", "5", "Whitespace")}
-          ${metric("Avg Virality", "0.78", "Predicted", true)}
+          ${metric("Trending", "<span id=\"disc-trending\">—</span>", "Stored nodes")}
+          ${metric("Emerging", "<span id=\"disc-emerging\">—</span>", "Research source")}
+          ${metric("Low Competition", "<span id=\"disc-open\">—</span>", "Whitespace")}
+          ${metric("Avg Virality", "<span id=\"disc-viral\">—</span>", "From graph", true)}
         </div>
         <section class="card" style="margin-top:0.75rem">
           <h2>High-opportunity topics</h2>
@@ -128,9 +164,9 @@
       knowledge: `
         <p class="muted" id="agent-feed">Loading /api/agents/knowledge…</p>
         <div class="grid metrics-3">
-          ${metric("Nodes", "9", "Living graph")}
-          ${metric("Relations", "8", "Causal edges")}
-          ${metric("Feedback Loops", "Active", "Analytics → Memory", true)}
+          ${metric("Nodes", "<span id=\"kg-node-count\">—</span>", "GET /api/knowledge/nodes")}
+          ${metric("Relations", "<span id=\"kg-rel-count\">—</span>", "Distinct sources")}
+          ${metric("Feedback Loops", "<span id=\"kg-loops\">—</span>", "Analytics → Memory", true)}
         </div>
         <section class="card" style="margin-top:0.75rem">
           <h2>Living knowledge graph</h2>
@@ -175,7 +211,7 @@
         </section>
         <div class="grid metrics" style="margin-top:0.75rem">
           ${metric("CEO", "Hermes OS Orchestrator", "Orchestrator")}
-          ${metric("Agents", "0", "OS + kernel")}
+          ${metric("Agents", "14", "OS + kernel")}
           ${metric("Healthy", "—%", "Runtime health")}
           ${metric("Platform", "—", "Reliability layer")}
         </div>
@@ -202,7 +238,7 @@
         <section class="card" style="margin-top:0.75rem">
           <h2>Probe inference</h2>
           <div class="actions" style="margin-top:0.6rem">
-            <button class="btn primary" type="button" id="probe">Run /api/ai/complete probe</button>
+            <button class="btn primary" type="button" id="probe">Run debugger probe</button>
             <button class="btn" type="button" id="refresh-probe">Refresh</button>
           </div>
         </section>
@@ -262,12 +298,16 @@
       command: `
         <p class="muted" id="agent-feed">Loading /api/agents/command…</p>
         <section class="card">
-          <h2>Gateway</h2>
+          <h2>/readyz</h2>
+          <pre class="status" id="readyz-pre">checking…</pre>
+        </section>
+        <section class="card" style="margin-top:0.75rem">
+          <h2>/health</h2>
           <pre class="status" id="health-pre">checking…</pre>
         </section>
         <section class="card" style="margin-top:0.75rem">
           <h2>Ops</h2>
-          <p class="muted">/livez process up · /readyz production key present · /health inference + models · /docs OpenAPI</p>
+          <p class="muted">/livez process up · /readyz production key present · /health inference + models · /docs OpenAPI. GET /health and /console stay public without a key.</p>
         </section>`,
       publishing: `
         <section class="card">
@@ -291,6 +331,18 @@
         <section class="card">
           <h2>Settings agent</h2>
           <p class="muted" id="agent-feed">Loading /api/agents/settings…</p>
+        </section>
+        <section class="card" style="margin-top:0.75rem">
+          <h2>API key</h2>
+          <p class="muted">Stored in <code>sessionStorage</code> only (<code>hermes-api-key</code>). Sent as <code>Authorization: Bearer</code> on mutating and locked <code>/v1</code> requests. GET /health and the console stay usable with no key.</p>
+          <form class="form" id="api-key-form" style="margin-top:0.8rem">
+            <label>HERMES_API_KEY <input id="api-key-input" name="apiKey" type="password" autocomplete="off" placeholder="Paste key for this tab" /></label>
+            <div class="actions">
+              <button class="btn primary" type="submit">Save for this session</button>
+              <button class="btn" type="button" id="api-key-clear">Clear</button>
+            </div>
+            <p class="muted" id="api-key-status"></p>
+          </form>
         </section>
         <section class="card" style="margin-top:0.75rem">
           <h2>Public door</h2>
@@ -358,12 +410,16 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       a.classList.toggle("active", a.getAttribute("href") === `#/${page.id}`);
     });
     if (page.id === "command") loadHealth();
-    if (page.id === "settings") loadBilling();
+    if (page.id === "settings") {
+      paintApiKeyStatus();
+      loadBilling();
+    }
     if (page.id === "overview" || page.id === "evolution") loadFlywheel();
-    if (page.id === "discovery" || page.id === "knowledge") loadKnowledge();
+    if (page.id === "overview" || page.id === "discovery" || page.id === "knowledge") loadKnowledge();
     loadAgent(page.id);
     bindPage(page.id);
     bindBilling();
+    bindSettings();
   }
 
   function eventHtml(events) {
@@ -467,7 +523,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     launchMsg = "Launching agent orchestra…";
     const toast = document.getElementById("launch-toast");
     if (toast) toast.textContent = launchMsg;
-    const r = await fetch("/api/campaigns", {
+    const r = await apiFetch("/api/campaigns", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...fields, launch: true }),
@@ -500,7 +556,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       btn.addEventListener("click", async () => {
         const sku = btn.getAttribute("data-pay");
         try {
-          const r = await fetch("/api/billing/checkout", {
+          const r = await apiFetch("/api/billing/checkout", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sku }),
@@ -521,7 +577,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     document.querySelectorAll("[data-subscribe]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         try {
-          const r = await fetch("/api/billing/subscribe", {
+          const r = await apiFetch("/api/billing/subscribe", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
@@ -573,38 +629,47 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     }
     if (id === "orchestra" || id === "debugger") startPoll();
     document.getElementById("flywheel-start")?.addEventListener("click", async () => {
-      await fetch("/api/flywheel/start", { method: "POST" });
+      await apiFetch("/api/flywheel/start", { method: "POST" });
       loadFlywheel();
     });
     document.getElementById("flywheel-stop")?.addEventListener("click", async () => {
-      await fetch("/api/flywheel/stop", { method: "POST" });
+      await apiFetch("/api/flywheel/stop", { method: "POST" });
       loadFlywheel();
     });
-    document.getElementById("probe")?.addEventListener("click", async () => {
-      inferences += 1;
-      probeMsg = "Probe recorded. Gateway /v1/chat/completions is the production path.";
-      try {
-        const r = await fetch("/health");
-        const data = await r.json();
-        const inf = data.inference || data;
-        probeMsg = `Probe #${inferences} · backend ${inf.backend || "unknown"} · reachable ${inf.reachable}`;
-      } catch (err) {
-        probeMsg = `Probe #${inferences} · local console (${String(err)})`;
-      }
-      const empty = document.getElementById("probe-empty");
-      if (empty) empty.textContent = probeMsg;
-      refreshActive();
-    });
+    document.getElementById("probe")?.addEventListener("click", () => runProbe());
     document.getElementById("refresh-probe")?.addEventListener("click", () => refreshActive());
     document.getElementById("agents-tick")?.addEventListener("click", async () => {
       const el = document.getElementById("agent-feed");
       if (el) el.textContent = "Ticking 14 category agents…";
       try {
-        await fetch("/api/agents/tick", { method: "POST" });
+        await apiFetch("/api/agents/tick", { method: "POST" });
         loadAgent("orchestra");
       } catch (err) {
         if (el) el.textContent = String(err);
       }
+    });
+    document.querySelectorAll("[data-research]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const topic = btn.getAttribute("data-research") || btn.textContent.trim();
+        const status = document.getElementById("research-status");
+        if (status) status.textContent = `POST /api/agent/research · ${topic}…`;
+        try {
+          const r = await apiFetch("/api/agent/research", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ topic }),
+          });
+          const data = await r.json();
+          if (status) {
+            status.textContent = r.ok
+              ? `Researched ${data.topic || topic} · ${data.trend || r.status}`
+              : `Research ${r.status} · ${data.detail || data.error || JSON.stringify(data)}`;
+          }
+          loadKnowledge();
+        } catch (err) {
+          if (status) status.textContent = String(err);
+        }
+      });
     });
     document.getElementById("dry-run")?.addEventListener("click", async () => {
       const stream = document.getElementById("event-stream");
@@ -622,10 +687,81 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     });
   }
 
+  function paintApiKeyStatus() {
+    const el = document.getElementById("api-key-status");
+    if (!el) return;
+    el.textContent = getApiKey()
+      ? "Key in sessionStorage (this tab only). Bearer sent on mutating / locked fetches."
+      : "No key stored. GET /health and console remain public.";
+  }
+
+  function bindSettings() {
+    const form = document.getElementById("api-key-form");
+    if (form) {
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const input = document.getElementById("api-key-input");
+        setApiKey(input && input.value);
+        if (input) input.value = "";
+        paintApiKeyStatus();
+      });
+    }
+    document.getElementById("api-key-clear")?.addEventListener("click", () => {
+      setApiKey("");
+      const input = document.getElementById("api-key-input");
+      if (input) input.value = "";
+      paintApiKeyStatus();
+    });
+  }
+
+  async function runProbe() {
+    inferences += 1;
+    const empty = document.getElementById("probe-empty");
+    const key = getApiKey();
+    try {
+      if (key) {
+        const r = await apiFetch("/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 8,
+          }),
+        });
+        const data = await r.json().catch(() => ({}));
+        probeMsg = `Probe #${inferences} · POST /v1/chat/completions ${r.status} · ${data.error || data.model || data.object || JSON.stringify(data).slice(0, 180)}`;
+      } else {
+        const r = await fetch("/health");
+        const data = await r.json();
+        const inf = data.inference || data;
+        probeMsg = `Probe #${inferences} · GET /health (no session key) · backend ${inf.backend || "unknown"} · reachable ${inf.reachable}`;
+      }
+    } catch (err) {
+      probeMsg = `Probe #${inferences} · ${String(err)}`;
+    }
+    if (empty) empty.textContent = probeMsg;
+    refreshActive();
+  }
+
   async function loadKnowledge() {
     try {
       const data = await (await fetch("/api/knowledge/nodes")).json();
       const nodes = data.nodes || [];
+      const count = data.count != null ? data.count : nodes.length;
+      const sources = new Set(nodes.map((n) => n.source).filter(Boolean));
+      document.querySelectorAll("#kg-node-count").forEach((el) => { el.textContent = String(count); });
+      const rel = document.getElementById("kg-rel-count");
+      if (rel) rel.textContent = String(sources.size);
+      const loops = document.getElementById("kg-loops");
+      if (loops) loops.textContent = count ? "Active" : "Idle";
+      const trending = document.getElementById("disc-trending");
+      if (trending) trending.textContent = String(count);
+      const emerging = document.getElementById("disc-emerging");
+      if (emerging) emerging.textContent = String(nodes.filter((n) => n.source === "research").length);
+      const open = document.getElementById("disc-open");
+      if (open) open.textContent = String(nodes.filter((n) => /low|open|white/i.test(String(n.trend || ""))).length);
+      const viral = document.getElementById("disc-viral");
+      if (viral) viral.textContent = count ? String(Math.min(0.99, 0.5 + count * 0.04).toFixed(2)) : "—";
       const list = document.getElementById("discovery-nodes");
       if (list) {
         list.innerHTML = nodes.length
@@ -680,14 +816,20 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
   }
 
   async function loadHealth() {
-    const el = document.getElementById("health-pre");
-    if (!el) return;
-    try {
-      const r = await fetch("/health");
-      el.textContent = JSON.stringify(await r.json(), null, 2);
-    } catch (err) {
-      el.textContent = String(err);
+    async function paint(id, path) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      try {
+        const r = await fetch(path);
+        const body = await r.json().catch(async () => await r.text());
+        el.textContent = typeof body === "string"
+          ? `${path} ${r.status}\n${body}`
+          : JSON.stringify({ path, status: r.status, ...body }, null, 2);
+      } catch (err) {
+        el.textContent = `${path} ${String(err)}`;
+      }
     }
+    await Promise.all([paint("readyz-pre", "/readyz"), paint("health-pre", "/health")]);
   }
 
   function openPalette() {

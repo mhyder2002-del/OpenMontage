@@ -387,6 +387,10 @@ def test_category_agents_tick_dry_run_when_lm_studio_down(client):
         assert row["label"] == "DRY-RUN"
         assert row["mode"] == "dry_run"
         assert row["summary"]
+        if row["id"] == "publishing":
+            assert "MoneyPrinter" in (row.get("moneyprinter") or row["summary"] or "")
+        if row["id"] == "command":
+            assert row.get("probes", {}).get("readyz") == "/readyz"
     snap = http.get("/api/agents").json()
     assert len(snap["categories"]) == 14
     assert all(c.get("label") == "DRY-RUN" for c in snap["categories"])
@@ -450,6 +454,8 @@ def test_console_pages_bind_every_category_agent():
     assert "COPY agents ./agents" in dockerfile
     assert "db.py" in dockerfile
     assert "research.py" in dockerfile
+    assert "moneyprinter.py" in dockerfile
+    assert "/readyz" in dockerfile
     assert "/api/knowledge/nodes" in os_js
     assert "/api/knowledge/nodes" in app_js
     compose = (APP_DIR / "docker-compose.yml").read_text(encoding="utf-8")
@@ -457,6 +463,12 @@ def test_console_pages_bind_every_category_agent():
     assert "HERMES_FLYWHEEL_AUTO" in compose
     assert "HERMES_AGENTS_STORE" in compose
     assert "DATABASE_URL" in compose
+    assert "hermes_data:/app/data" in compose
+    assert "/readyz" in compose
+    hosted = (APP_DIR / "docker-compose.hosted.yml").read_text(encoding="utf-8")
+    assert "HERMES_DB_PATH" in hosted
+    assert "hermes_data:/app/data" in hosted
+    assert "/readyz" in hosted
 
 
 def test_research_endpoint_self_heals_and_upserts_node(client, tmp_path):
@@ -498,3 +510,90 @@ def test_knowledge_db_migrates_json_campaigns(tmp_path, monkeypatch):
     assert Path(path).is_file()
     rows = hermes_db.list_campaign_rows()
     assert any(r.get("id") == "c1" for r in rows)
+
+
+def test_campaigns_sqlite_round_trip(tmp_path, monkeypatch):
+    import db as hermes_db
+    import campaigns as camp
+
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "sot.db"))
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "legacy.json"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    hermes_db.reset_migrate_flag()
+    created = camp.create_campaign({"niche": "SQLite niche", "goal": "round-trip"})
+    cid = created["id"]
+    loaded = camp.get_campaign(cid)
+    assert loaded is not None
+    assert loaded["niche"] == "SQLite niche"
+    listed = camp.list_campaigns()
+    assert listed[0]["id"] == cid
+    rows = hermes_db.list_campaign_rows()
+    assert any(r.get("id") == cid and r.get("niche") == "SQLite niche" for r in rows)
+    loaded["status"] = "queued"
+    camp.upsert_campaign(loaded)
+    again = hermes_db.get_campaign_row(cid)
+    assert again is not None
+    assert again["status"] == "queued"
+    assert not (tmp_path / "legacy.json").is_file()
+
+
+def test_mutating_api_auth_503_vs_401(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    import db as hermes_db
+
+    monkeypatch.setenv("PUBLIC_DOMAIN", "hermestudios.com")
+    monkeypatch.delenv("HERMES_API_KEY", raising=False)
+    monkeypatch.delenv("HERMES_REQUIRE_AUTH", raising=False)
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "auth.db"))
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "auth-campaigns.json"))
+    monkeypatch.setenv("HERMES_FLYWHEEL_STORE", str(tmp_path / "fw.json"))
+    monkeypatch.setenv("HERMES_AGENTS_STORE", str(tmp_path / "ag.json"))
+    monkeypatch.setenv("INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
+    hermes_db.reset_migrate_flag()
+    http = TestClient(_load_app().app)
+    assert http.get("/livez").status_code == 200
+    assert http.get("/health").status_code == 200
+    assert http.get("/api/campaigns").status_code == 200
+    assert http.post("/api/campaigns", json={"niche": "x", "launch": False}).status_code == 503
+    assert http.post("/api/flywheel/start").status_code == 503
+    assert http.post("/api/agents/tick").status_code == 503
+
+    token = "unit-test-bearer"
+    monkeypatch.setenv("HERMES_API_KEY", token)
+    hermes_db.reset_migrate_flag()
+    http = TestClient(_load_app().app)
+    assert http.post("/api/campaigns", json={"niche": "x", "launch": False}).status_code == 401
+    assert http.post("/api/flywheel/start").status_code == 401
+    assert http.post("/api/agents/tick").status_code == 401
+    created = http.post(
+        "/api/campaigns",
+        json={"niche": "x", "launch": False},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created.status_code == 200
+    assert created.json()["id"]
+
+
+def test_flywheel_origin_from_public_domain(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    import db as hermes_db
+
+    monkeypatch.setenv("PUBLIC_DOMAIN", "hermestudios.com")
+    monkeypatch.setenv("HERMES_API_KEY", "origin-test-key")
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "origin.db"))
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "origin-campaigns.json"))
+    monkeypatch.setenv("HERMES_FLYWHEEL_STORE", str(tmp_path / "origin-fw.json"))
+    monkeypatch.setenv("INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
+    hermes_db.reset_migrate_flag()
+    http = TestClient(_load_app().app)
+    health = http.get("/health")
+    assert health.status_code == 200
+    assert health.json()["flywheel"]["origin"] == "https://hermestudios.com"
+    snap = http.get("/api/flywheel")
+    assert snap.status_code == 200
+    assert snap.json()["origin"] == "https://hermestudios.com"
+
