@@ -76,6 +76,25 @@ const TOPICS = [
   ["Everyday Carry", "0.50", "0.82", "0.70", "0.82"],
 ];
 
+const WALK_PLACEHOLDER = "/static/placeholders/walking-skeleton.svg";
+
+function walkPanelHtml() {
+  return `
+      <article class="card" style="margin-top:0.75rem" id="walk-panel">
+        <strong>Campaigns / Studio · walking skeleton</strong>
+        <p class="hint">POST /api/v1/scripts → /api/v1/storyboards → /api/v1/thumbnails. Save a Bearer key under Settings first.</p>
+        <form id="walk-form">
+          <div class="field"><label for="walk-topic">TOPIC</label><input id="walk-topic" value="AI education" /></div>
+          <div class="field"><label for="walk-audience">AUDIENCE</label><input id="walk-audience" value="founders" /></div>
+          <button type="submit" class="primary" id="walk-run">Generate script → storyboard → thumbnail</button>
+        </form>
+        <p class="hint" id="walk-status" style="margin-top:0.6rem">Ready. Thumbnail shows ${WALK_PLACEHOLDER} until the chain returns thumbnail_url.</p>
+        <pre class="hint" id="walk-script" style="margin-top:0.7rem;white-space:pre-wrap" hidden></pre>
+        <div id="walk-scenes"></div>
+        <img id="walk-thumb" class="walk-thumb" alt="Walking skeleton thumbnail" src="${WALK_PLACEHOLDER}" width="320" height="180" />
+      </article>`;
+}
+
 function card(label, value, hint, glow, mint) {
   return `<article class="card${glow ? " glow" : ""}"><div class="label">${label}</div><div class="value${mint ? " mint" : ""}">${value}</div><div class="hint">${hint}</div></article>`;
 }
@@ -91,12 +110,13 @@ const PAGES = {
       </article>
       <article class="card" style="margin-top:0.75rem">
         <strong>Plans</strong>
-        <p class="hint">Stripe Checkout for campaign packs and Autonomous v0.4.0 (test mode until you approve live).</p>
+        <p class="hint">Stripe Checkout for campaign packs and Autonomous v0.4.0. Mode comes from GET /api/billing/config.</p>
         <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.7rem">
           <button type="button" class="primary" data-pay="campaign_launch">Pay campaign launch</button>
           <button type="button" class="ghost" data-subscribe>Subscribe console</button>
         </div>
         <p class="hint" id="billing-status" style="margin-top:0.6rem"></p>
+        <p class="hint" id="billing-copy" style="margin-top:0.4rem"></p>
       </article>
       <div class="grid cols-4" style="margin-top:0.75rem">
         ${card("Revenue", "$12.4k", "30d · +18%", true, true)}
@@ -108,7 +128,7 @@ const PAGES = {
         ${card("AI confidence", "0.91", "Prediction gate")}
         ${card("Opportunities", "37", "High velocity")}
         ${card("Knowledge nodes", "<span id=\"kg-node-count\">—</span>", "Living graph")}
-        ${card("Flywheel cycles", "—", "Live /api/flywheel", true, true)}
+        ${card("Flywheel cycles", "<span id=\"flywheel-cycles\">—</span>", "Live /api/flywheel", true, true)}
         ${card("Agents online", "14", "Orchestra ready")}
         ${card("Channel health", "Strong", "Growth forecast ↑")}
       </div>
@@ -197,7 +217,8 @@ const PAGES = {
           <strong>Active cuts</strong>
           <div id="active-cuts"><p class="hint">Launch the video-campaign agent to plan cuts.</p></div>
         </article>
-      </div>`;
+      </div>
+      ${walkPanelHtml()}`;
   },
   orchestra() {
     return `
@@ -244,7 +265,7 @@ const PAGES = {
       </article>`;
   },
   studio() {
-    return `<article class="card"><strong>Studio</strong><p class="hint" id="agent-feed">Loading /api/agents/studio…</p><p class="hint">Scene stack for Hermes OS — Platform Promo and Everyday Carry.</p></article>`;
+    return `<article class="card"><strong>Studio</strong><p class="hint" id="agent-feed">Loading /api/agents/studio…</p><p class="hint">Scene stack for Hermes OS — Platform Promo and Everyday Carry.</p></article>${walkPanelHtml()}`;
   },
   evolution() {
     return `<p class="hint" id="agent-feed">Loading /api/agents/evolution…</p>
@@ -288,6 +309,7 @@ const PAGES = {
       </form>
       <p class="hint" id="api-key-status" style="margin-top:0.6rem"></p>
       <p class="hint" id="billing-status" style="margin-top:0.7rem">Loading Stripe…</p>
+      <p class="hint" id="billing-copy"></p>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.7rem">
         <button type="button" class="primary" data-pay="campaign_launch">Pay campaign launch</button>
         <button type="button" class="ghost" data-pay="credit_pack">Credit pack</button>
@@ -361,9 +383,27 @@ function wire(id) {
   });
   const dry = document.getElementById("dry-run");
   if (dry) {
-    dry.addEventListener("click", () => {
-      document.getElementById("events").textContent =
-        "Dry-run queued · Research Agent scanning AI education…";
+    dry.addEventListener("click", async () => {
+      const stream = document.getElementById("events");
+      if (stream) stream.textContent = "Launching labeled dry-run orchestra…";
+      try {
+        const r = await apiFetch("/api/campaigns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            niche: "AI education",
+            goal: "Grow subscribers",
+            brief: "Labeled dry-run video campaign from Orchestra.",
+            launch: true,
+            agent: "video-campaign",
+          }),
+        });
+        const campaign = await r.json();
+        if (stream) stream.textContent = `${campaign.status || r.status} · ${campaign.id || ""}`;
+        if (campaign.id) sessionStorage.setItem("hermes-active-campaign", campaign.id);
+      } catch (err) {
+        if (stream) stream.textContent = String(err);
+      }
     });
   }
   const probe = document.getElementById("probe");
@@ -381,6 +421,7 @@ function wire(id) {
   bindBilling();
   bindSettings();
   bindResearch();
+  bindWalking();
   const fwStart = document.getElementById("flywheel-start");
   if (fwStart) fwStart.addEventListener("click", async () => {
     await apiFetch("/api/flywheel/start", { method: "POST" });
@@ -521,21 +562,99 @@ function loadFlywheel() {
       if (el) {
         el.textContent = `${d.cycle_count || 0} cycles · ${d.running ? "running" : "stopped"} · ${d.origin}${d.last_self_check && d.last_self_check.inference_down ? " · DRY-RUN" : ""}`;
       }
+      document.querySelectorAll("#flywheel-cycles").forEach((n) => {
+        n.textContent = String(d.cycle_count || 0);
+      });
     })
     .catch((e) => { if (el) el.textContent = String(e); });
 }
 
 function loadBilling() {
   const el = document.getElementById("billing-status");
-  if (!el) return;
+  const copy = document.getElementById("billing-copy");
+  if (!el && !copy) return;
   fetch("/api/billing/config")
     .then((r) => r.json())
     .then((d) => {
-      el.textContent = d.configured
-        ? `Stripe ${d.test_mode ? "test" : "live"} ready`
-        : (d.hint || "Set STRIPE_SECRET_KEY=sk_test_...");
+      const skus = (d.products || []).map((p) => p.sku).join(", ");
+      const live = Boolean(d.configured) && d.test_mode === false;
+      if (el) {
+        if (live) el.innerHTML = `Stripe <strong>live</strong> · ${skus}`;
+        else if (d.configured) el.textContent = `Stripe test · ${skus}`;
+        else el.textContent = d.hint || "Set STRIPE_SECRET_KEY (sk_test_… or sk_live_…).";
+      }
+      if (copy) {
+        copy.textContent = live
+          ? "Checkout is live (not test_mode)."
+          : d.configured
+            ? "Stripe Checkout is in test mode (sk_test_)."
+            : "Checkout waits until a secret key is configured.";
+      }
     })
-    .catch((e) => { el.textContent = String(e); });
+    .catch((e) => { if (el) el.textContent = String(e); });
+}
+
+function bindWalking() {
+  const form = document.getElementById("walk-form");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const status = document.getElementById("walk-status");
+    const scriptEl = document.getElementById("walk-script");
+    const scenesEl = document.getElementById("walk-scenes");
+    const img = document.getElementById("walk-thumb");
+    const topic = (document.getElementById("walk-topic") || {}).value || "AI";
+    const audience = (document.getElementById("walk-audience") || {}).value || "";
+    const fail = (step, r, body) => {
+      const detail = body.detail || body.error || JSON.stringify(body);
+      if (status) status.textContent = `${step} ${r.status} · ${detail}`;
+    };
+    try {
+      if (status) status.textContent = "POST /api/v1/scripts…";
+      const scriptRes = await apiFetch("/api/v1/scripts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, audience }),
+      });
+      const script = await scriptRes.json().catch(() => ({}));
+      if (!scriptRes.ok) return fail("scripts", scriptRes, script);
+      if (scriptEl) {
+        scriptEl.hidden = false;
+        scriptEl.textContent = script.script || "";
+      }
+      if (status) status.textContent = `script ${script.script_id} · POST /api/v1/storyboards…`;
+      const boardRes = await apiFetch("/api/v1/storyboards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ script_id: script.script_id }),
+      });
+      const board = await boardRes.json().catch(() => ({}));
+      if (!boardRes.ok) return fail("storyboards", boardRes, board);
+      if (scenesEl) {
+        const scenes = board.scenes || [];
+        scenesEl.innerHTML = scenes.map((s) => `
+          <div class="row">
+            <div><strong>${s.title || `Scene ${s.index}`}</strong><div class="hint">${s.visual || ""} · ${s.duration_s || 6}s</div></div>
+          </div>`).join("");
+      }
+      if (status) status.textContent = `storyboard ${board.storyboard_id} · POST /api/v1/thumbnails…`;
+      const thumbRes = await apiFetch("/api/v1/thumbnails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script_id: script.script_id,
+          storyboard_id: board.storyboard_id,
+        }),
+      });
+      const thumb = await thumbRes.json().catch(() => ({}));
+      if (!thumbRes.ok) return fail("thumbnails", thumbRes, thumb);
+      const url = thumb.thumbnail_url || WALK_PLACEHOLDER;
+      if (img) img.src = url;
+      if (status) status.textContent = `thumbnail_url ${url}`;
+    } catch (err) {
+      if (status) status.textContent = String(err);
+    }
+  });
 }
 
 function bindBilling() {

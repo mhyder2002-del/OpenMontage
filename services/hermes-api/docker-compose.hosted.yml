@@ -25,6 +25,8 @@ services:
       HERMES_AGENT_INFER_TIMEOUT: ${HERMES_AGENT_INFER_TIMEOUT:-8}
       HERMES_CAMPAIGN_STORE: ${HERMES_CAMPAIGN_STORE:-/app/data/campaigns.json}
       HERMES_DB_PATH: ${HERMES_DB_PATH:-/app/data/hermes.db}
+      # Empty by default. Profile postgres + DATABASE_URL=postgresql://hermes:hermes@postgres:5432/hermes
+      # $0 extra on existing VPS 187.77.98.177 vs advertised intro ~$6.49/mo new KVM 1 (paid upfront).
       DATABASE_URL: ${DATABASE_URL:-}
       HERMES_RESEARCH_TIMEOUT: ${HERMES_RESEARCH_TIMEOUT:-4}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
@@ -73,8 +75,28 @@ services:
         tar -xzf /tmp/om.tgz -C /tmp/om --strip-components=1
         cp -a /tmp/om/services/hermes-api/. /app/
         cd /app
-        pip install --no-cache-dir -r requirements.txt -r requirements.billing.txt
+        pip install --no-cache-dir -r requirements.txt -r requirements.billing.txt -r requirements.postgres.txt
         exec uvicorn app:app --host 0.0.0.0 --port 8080
+
+  # Optional. Not in the default stack. Do not start on 187.77.98.177 until cost OK
+  # ($0 extra on that VPS vs ~$6.49/mo new KVM 1 paid upfront). Do not buy a KVM.
+  # COMPOSE_PROFILES=postgres DATABASE_URL=postgresql://hermes:hermes@postgres:5432/hermes
+  postgres:
+    profiles: ["postgres"]
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hermes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hermes}
+      POSTGRES_DB: ${POSTGRES_DB:-hermes}
+    volumes:
+      - hermes_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
   caddy:
     image: caddy:2-alpine
@@ -114,5 +136,6 @@ services:
 
 volumes:
   hermes_data:
+  hermes_pg:
   caddy_data:
   caddy_config:

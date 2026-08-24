@@ -19,7 +19,10 @@ def _mpt_note() -> str:
     if not isinstance(latest, dict):
         if enabled():
             return " MoneyPrinterTurbo is enabled; no campaign outputs yet."
-        return " MoneyPrinterTurbo optional (DRY-RUN until MONEYPRINTER_ENABLED + API)."
+        return (
+            " MoneyPrinterTurbo optional (DRY-RUN until MONEYPRINTER_ENABLED + :8088). "
+            "Renders stay in pipeline_defs/hermes-flywheel.yaml."
+        )
     mpt = latest.get("moneyprinter") if isinstance(latest.get("moneyprinter"), dict) else {}
     paths = mpt.get("video_paths") or []
     label = mpt.get("label") or "unset"

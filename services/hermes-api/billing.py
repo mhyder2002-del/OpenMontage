@@ -1,4 +1,9 @@
-"""Stripe billing for Hermes OS (test-mode Checkout + subscriptions).
+"""Stripe billing for Hermes OS (Checkout + subscriptions).
+
+Live Checkout is allowed when STRIPE_SECRET_KEY starts with sk_live_.
+Production-locked domains require STRIPE_WEBHOOK_SECRET (unsigned webhooks rejected).
+Webhook URL: https://hermestudios.com/api/billing/webhook
+Never log or commit live keys.
 
 Payment types (from product copy — campaigns + /v1 usage):
   implemented
@@ -22,8 +27,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-# Catalog amounts are USD test prices only. Do not treat as live SKUs until
-# the operator creates matching Dashboard products and confirms paid go-live.
+# Dashboard SKUs (operator creates Products in Stripe Dashboard; optional
+# STRIPE_PRICE_* IDs). Empty price env → Checkout uses inline price_data.
 CATALOG: dict[str, dict[str, Any]] = {
     "campaign_launch": {
         "sku": "campaign_launch",
@@ -96,12 +101,24 @@ def webhook_secret() -> str:
     return (os.environ.get("STRIPE_WEBHOOK_SECRET") or "").strip()
 
 
+def production_locked() -> bool:
+    if os.environ.get("HERMES_REQUIRE_AUTH", "").lower() in {"1", "true", "yes"}:
+        return True
+    domain = (os.environ.get("PUBLIC_DOMAIN") or "localhost").strip().lower()
+    return (
+        domain.endswith("hermestudios.com")
+        or domain.endswith("hermestudios.online")
+        or domain.endswith("hermestudios.org")
+    )
+
+
 def configured() -> bool:
     key = secret_key()
     return key.startswith(("sk_", "rk_"))
 
 
 def test_mode() -> bool:
+    """True for sk_test_* or when Stripe is not configured. sk_live_* is live."""
     return secret_key().startswith("sk_test_") or not configured()
 
 
@@ -173,9 +190,10 @@ def not_configured_payload() -> dict[str, Any]:
         "ok": False,
         "error": "stripe_not_configured",
         "hint": (
-            "Set STRIPE_SECRET_KEY=sk_test_... (test mode only) and optional "
-            "STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET. Copy services/hermes-api/.env.example. "
-            "Do not use sk_live keys without operator approval."
+            "Set STRIPE_SECRET_KEY (sk_test_... or sk_live_...) plus "
+            "STRIPE_PUBLISHABLE_KEY. Production-locked hosts require "
+            "STRIPE_WEBHOOK_SECRET. Copy services/hermes-api/.env.example. "
+            "Never commit live keys."
         ),
         "docs": "https://docs.stripe.com/checkout/quickstart",
     }
@@ -201,6 +219,7 @@ def public_config() -> dict[str, Any]:
         "ok": True,
         "configured": configured(),
         "test_mode": test_mode(),
+        "webhook_url": f"{public_origin()}/api/billing/webhook",
         "publishable_key": publishable_key() or None,
         "automatic_tax": automatic_tax(),
         "products": products,
@@ -422,6 +441,12 @@ def apply_event(event: dict[str, Any]) -> dict[str, Any]:
 
 def construct_event(payload: bytes, signature: str | None) -> dict[str, Any]:
     secret = webhook_secret()
+    if production_locked() and not secret:
+        raise ValueError(
+            "STRIPE_WEBHOOK_SECRET required in production-locked mode; "
+            "unsigned webhooks are rejected. Endpoint: "
+            "https://hermestudios.com/api/billing/webhook"
+        )
     if not secret:
         try:
             body = json.loads(payload.decode("utf-8"))

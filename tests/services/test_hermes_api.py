@@ -192,6 +192,15 @@ def test_campaign_create_launch_self_heals_when_inference_down(client, tmp_path,
     assert len(events.json()["events"]) >= 6
     listed = http.get("/api/campaigns").json()["campaigns"]
     assert any(item["id"] == campaign_id for item in listed)
+    listed_body = http.get("/api/campaigns").json()
+    assert listed_body["engine"]["pipeline"] == "hermes-flywheel"
+    assert listed_body["engine"]["live_compose"] is False
+    assert listed_body["engine"]["inference_down"] is True
+    assert polled["label"] == "DRY-RUN"
+    assert polled["pipeline"] == "hermes-flywheel"
+    assert polled["live_compose"] is False
+    assert polled["publish"]["label"] == "DRY-RUN"
+    assert polled["publish"]["binary_upload"] is False
 
 
 def test_campaign_live_inference_completes_without_heal(client, tmp_path, monkeypatch):
@@ -224,6 +233,9 @@ def test_campaign_live_inference_completes_without_heal(client, tmp_path, monkey
             break
     assert polled["status"] == "completed"
     assert polled["healed"] is False
+    assert polled["label"] == "live"
+    assert polled["pipeline"] == "hermes-flywheel"
+    assert polled["live_compose"] is False
     assert any(ev.get("type") == "stage_inferred" for ev in polled["events"])
     assert polled.get("agent") == "video-campaign"
     assert len(polled.get("cuts") or []) == 3
@@ -315,6 +327,16 @@ def test_flywheel_tick_continues_after_healed_campaign(client):
     snap = http.get("/api/flywheel").json()
     assert snap["cycle_count"] >= 2
     assert snap["origin"] == "http://127.0.0.1:8091"
+    assert snap["inference_down"] is True
+    assert snap["healed"] is True
+    assert snap["label"] == "DRY-RUN"
+    assert snap["pipeline"] == "hermes-flywheel"
+    assert snap["live_compose"] is False
+    assert snap["last_tick"]["label"] == "DRY-RUN"
+    assert snap["last_tick"]["healed"] is True
+    health = http.get("/health").json()
+    assert health["flywheel"]["inference_down"] is True
+    assert health["flywheel"]["label"] == "DRY-RUN"
 
 
 def test_flywheel_stop_flag(client):
@@ -352,7 +374,35 @@ def test_flywheel_http_start_returns_ok(client):
     assert started.status_code == 200
     body = started.json()
     assert body["origin"] == "http://127.0.0.1:8091"
+    assert body["running"] is True
+    assert body["operator"]["launch"] == "POST /api/campaigns"
     http.post("/api/flywheel/stop")
+
+
+def test_campaign_launch_endpoint_auth_and_dry_run_labels(client):
+    http, _ = client
+    queued = http.post(
+        "/api/campaigns",
+        json={"niche": "Launch endpoint", "goal": "Grow", "launch": False},
+    )
+    assert queued.status_code == 200
+    cid = queued.json()["id"]
+    assert queued.json()["status"] == "queued"
+    launched = http.post(f"/api/campaigns/{cid}/launch")
+    assert launched.status_code == 200
+    assert launched.json()["status"] in {"running", "completed_healed", "completed"}
+    polled = None
+    for _ in range(80):
+        polled = http.get(f"/api/campaigns/{cid}").json()
+        if polled["status"] in {"completed", "completed_healed", "failed"}:
+            break
+    assert polled["status"] == "completed_healed"
+    assert polled["label"] == "DRY-RUN"
+    assert polled["healed"] is True
+    events = http.get(f"/api/campaigns/{cid}/events").json()
+    assert events["label"] == "DRY-RUN"
+    assert events["pipeline"] == "hermes-flywheel"
+    assert events["publish"]["label"] == "DRY-RUN"
 
 
 def test_category_agents_tick_dry_run_when_lm_studio_down(client):
@@ -459,6 +509,11 @@ def test_console_pages_bind_every_category_agent():
     assert "/readyz" in dockerfile
     assert "/api/knowledge/nodes" in os_js
     assert "/api/knowledge/nodes" in app_js
+    for walking in ("/api/v1/scripts", "/api/v1/storyboards", "/api/v1/thumbnails", "/static/placeholders/walking-skeleton.svg"):
+        assert walking in os_js
+        assert walking in app_js
+    assert 'Stripe <strong>live</strong>' in os_js
+    assert 'Stripe <strong>live</strong>' in app_js
     compose = (APP_DIR / "docker-compose.yml").read_text(encoding="utf-8")
     assert "${HERMES_HOST_PORT:-8091}:8080" in compose
     assert "HERMES_FLYWHEEL_AUTO" in compose
@@ -559,6 +614,7 @@ def test_mutating_api_auth_503_vs_401(monkeypatch, tmp_path):
     assert http.get("/api/campaigns").status_code == 200
     assert http.post("/api/campaigns", json={"niche": "x", "launch": False}).status_code == 503
     assert http.post("/api/flywheel/start").status_code == 503
+    assert http.post("/api/campaigns/x/launch").status_code == 503
     assert http.post("/api/agents/tick").status_code == 503
     assert http.post("/api/v1/scripts", json={"topic": "AI", "audience": "devs"}).status_code == 503
 
@@ -569,6 +625,7 @@ def test_mutating_api_auth_503_vs_401(monkeypatch, tmp_path):
     assert http.post("/api/campaigns", json={"niche": "x", "launch": False}).status_code == 401
     assert http.post("/api/flywheel/start").status_code == 401
     assert http.post("/api/agents/tick").status_code == 401
+    assert http.post("/api/campaigns/missing/launch").status_code == 401
     created = http.post(
         "/api/campaigns",
         json={"niche": "x", "launch": False},
@@ -576,6 +633,11 @@ def test_mutating_api_auth_503_vs_401(monkeypatch, tmp_path):
     )
     assert created.status_code == 200
     assert created.json()["id"]
+    launch = http.post(
+        f"/api/campaigns/{created.json()['id']}/launch",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert launch.status_code == 200
     assert http.post("/api/v1/scripts", json={"topic": "AI", "audience": "devs"}).status_code == 401
     scripts = http.post(
         "/api/v1/scripts",

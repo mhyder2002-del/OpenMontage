@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Hermes OS console</title>
+    <title>Hermes OS — AI Media Operating System</title>
     <meta
       name="description"
       content="Hermes OS — live AI media operating system. Research, create, optimize, and scale autonomous campaigns."
@@ -11,104 +11,150 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/landing.css" />
   </head>
   <body>
-    <a class="skip" href="#main">Skip to workspace</a>
-
-    <section class="splash" id="splash" aria-label="Splash">
-      <div class="splash-inner">
-        <p class="live-dot"><i aria-hidden="true"></i> Live product walkthrough</p>
-        <div class="logo-h lg" aria-hidden="true">H</div>
-        <h1>This is the Hermes OS console.</h1>
-        <p class="sub">Every screen you’re about to see is running live.</p>
+    <a class="skip" href="#main">Skip to content</a>
+    <div class="gridbg" aria-hidden="true"></div>
+    <header class="top">
+      <a class="brand" href="/">
+        <span class="logo" aria-hidden="true">H</span>
+        <span>
+          <strong>Hermes OS</strong>
+          <small>AI Media Operating System</small>
+        </span>
+      </a>
+      <nav aria-label="Site">
+        <a href="/console#/overview">Overview</a>
+        <a href="/console#/discovery">Discovery</a>
+        <a href="/console#/campaigns">Campaigns</a>
+        <a href="/console#/command">Command Center</a>
+        <a href="/docs">API</a>
+      </nav>
+      <a class="btn" href="/console#/overview">Open console</a>
+    </header>
+    <main id="main">
+      <section class="hero">
+        <p class="live-dot"><i aria-hidden="true"></i> Live on this host</p>
+        <div class="logo-lg" aria-hidden="true">H</div>
+        <h1>This isn’t a mockup. It’s running right now.</h1>
+        <p class="tag">Research · Create · Optimize · Scale — one FastAPI console.</p>
+        <div class="rule"></div>
+        <p class="lede">
+          Hermes OS is the locked public door for Hermes Studios: OpenAI-compatible
+          <code>/v1</code>, a live flywheel, and an operator console that hits real routes.
+        </p>
+        <div class="status-row" id="live-status" aria-live="polite">
+          <span class="status-chip" data-k="readyz">readyz…</span>
+          <span class="status-chip" data-k="health">health…</span>
+          <span class="status-chip" data-k="flywheel">flywheel…</span>
+        </div>
         <video
-          class="splash-video"
+          class="hero-video"
           src="/static/media/hermes-os.mp4"
           muted
           loop
           playsinline
           autoplay
+          controls
           preload="metadata"
         ></video>
-        <button type="button" class="enter" id="enter-console">Enter console</button>
-      </div>
-    </section>
-
-    <section class="outro" id="outro" aria-label="End card">
-      <div>
-        <div class="brand-row">
-          <div class="logo-h lg" aria-hidden="true">H</div>
-          <h1>Hermes OS</h1>
+        <div class="cta-row">
+          <a class="btn" href="/console#/overview">Enter console</a>
+          <a class="ghost" href="/console#/command">Command Center</a>
+          <a class="ghost" href="/health">/health</a>
         </div>
-        <p>This isn’t a mockup. <em>It’s running right now.</em></p>
-        <hr class="glow-rule" />
-        <p style="margin-top:1.4rem">
-          <button type="button" class="enter" id="back-console">Back to console</button>
+      </section>
+      <section class="section">
+        <p class="kicker">Surfaces</p>
+        <h2>Operator console, not a brochure</h2>
+        <p class="lede" style="margin-left:0;text-align:left">
+          Every tile opens a hash route that loads live JSON. Mutating actions need a Bearer key on production.
         </p>
-      </div>
-    </section>
-
-    <div class="app" id="app">
-      <div class="mobile-nav">
-        <strong>Hermes OS</strong>
-        <button type="button" class="btn" id="menu-toggle" aria-expanded="false">Menu</button>
-      </div>
-      <aside class="sidebar" id="sidebar">
-        <a class="brand" href="#/overview">
-          <span class="logo-h" aria-hidden="true">H</span>
-          <span>
-            <strong>Hermes OS</strong>
-            <span>AI Media Operating System</span>
-          </span>
-        </a>
-        <nav aria-label="Console">
-          <a href="#/overview">Overview</a>
-          <a href="#/discovery">Discovery</a>
-          <a href="#/knowledge">Knowledge Graph</a>
-          <a href="#/campaigns">Campaigns</a>
-          <a href="#/orchestra">Agent Orchestra</a>
-          <a href="#/debugger">AI Debugger</a>
-          <a href="#/studio">Studio</a>
-          <a href="#/evolution">Evolution Lab</a>
-          <a href="#/analytics">Analytics</a>
-          <a href="#/memory">Memory</a>
-          <a href="#/command">Command Center</a>
-          <a href="#/publishing">Publishing</a>
-          <a href="#/uploads">Uploads</a>
-          <a href="#/settings">Settings</a>
-        </nav>
-        <div class="side-foot">
-          <span>v0.4.0</span>
-          <span class="badge"><i aria-hidden="true"></i> Autonomous</span>
+        <div class="tiles">
+          <article>
+            <h3>Discovery</h3>
+            <p>Chip a source. POST /api/agent/research upserts knowledge nodes.</p>
+            <a href="/console#/discovery">Open Discovery</a>
+          </article>
+          <article>
+            <h3>Campaigns</h3>
+            <p>Launch the video-campaign orchestra. Dry-run heals when inference is down.</p>
+            <a href="/console#/campaigns">Open Campaigns</a>
+          </article>
+          <article>
+            <h3>Command Center</h3>
+            <p>Public /readyz, /health, and flywheel running state — no key required to read.</p>
+            <a href="/console#/command">Open Command</a>
+          </article>
+          <article>
+            <h3>Evolution Lab</h3>
+            <p>Start/stop the perpetual flywheel. DRY-RUN when inference is unreachable.</p>
+            <a href="/console#/evolution">Open Evolution</a>
+          </article>
         </div>
-      </aside>
-      <div class="workspace">
-        <header class="topbar">
-          <div>
-            <h1 id="page-title">Overview</h1>
-            <p id="page-sub">Research · Create · Optimize · Scale</p>
-          </div>
-          <div class="actions">
-            <button type="button" class="btn" id="open-cmd"><span class="kbd">⌘K</span> Command</button>
-            <button type="button" class="btn primary" id="launch-campaign">Launch campaign</button>
-          </div>
-        </header>
-        <main id="main" tabindex="-1"></main>
-      </div>
-    </div>
-
-    <div class="palette" id="palette" role="dialog" aria-modal="true" aria-labelledby="cmd-label">
-      <div class="palette-box">
-        <label id="cmd-label" class="skip" for="cmd-input">Command</label>
-        <input id="cmd-input" type="search" placeholder="Jump to a surface…" autocomplete="off" />
-        <div id="cmd-list"></div>
-      </div>
-    </div>
-
-    <script src="/static/app.js"></script>
+      </section>
+      <section class="section api">
+        <p class="kicker">Gateway</p>
+        <h2>OpenAI-compatible /v1</h2>
+        <pre>export OPENAI_BASE_URL=https://hermestudios.com/v1
+export OPENAI_API_KEY=$HERMES_API_KEY</pre>
+        <p class="status">GET /health and /console stay public. Chat completions require Bearer HERMES_API_KEY.</p>
+      </section>
+    </main>
+    <footer>
+      <span>v0.4.0</span>
+      <a href="/console">Console</a>
+      <a href="/docs">/docs</a>
+      <a href="/livez">/livez</a>
+      <a href="/readyz">/readyz</a>
+    </footer>
+    <script>
+      (function () {
+        const row = document.getElementById("live-status");
+        if (!row) return;
+        function chip(k, text, ok) {
+          const el = row.querySelector('[data-k="' + k + '"]');
+          if (!el) return;
+          el.textContent = text;
+          el.classList.toggle("ok", !!ok);
+          el.classList.toggle("warn", !ok);
+        }
+        async function tick() {
+          try {
+            const rz = await fetch("/readyz");
+            const body = await rz.json().catch(() => ({}));
+            chip("readyz", "/readyz " + rz.status, rz.ok && body.ok);
+          } catch (e) {
+            chip("readyz", "readyz down", false);
+          }
+          try {
+            const h = await fetch("/health");
+            const data = await h.json();
+            const inf = (data.inference || {}).reachable;
+            chip("health", "/health " + (inf ? "inference up" : "inference down"), h.ok);
+          } catch (e) {
+            chip("health", "health down", false);
+          }
+          try {
+            const f = await fetch("/api/flywheel");
+            const data = await f.json();
+            const run = !!data.running;
+            chip(
+              "flywheel",
+              "flywheel " + (run ? "running" : "stopped") + " · " + (data.cycle_count || 0) + " cycles",
+              f.ok
+            );
+          } catch (e) {
+            chip("flywheel", "flywheel n/a", false);
+          }
+        }
+        tick();
+        setInterval(tick, 12000);
+      })();
+    </script>
   </body>
 </html>

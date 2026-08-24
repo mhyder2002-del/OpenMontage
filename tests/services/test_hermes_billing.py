@@ -148,3 +148,57 @@ def test_status_exposes_billing(client):
     status = http.get("/api/status").json()
     assert status["billing"] == "/api/billing/config"
     assert status["stripe_configured"] is False
+
+
+def test_live_vs_test_mode_from_key_prefix(client, monkeypatch):
+    http, _ = client
+    billing_mod = sys.modules.get("billing") or __import__("billing")
+
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    assert billing_mod.configured() is False
+    assert billing_mod.test_mode() is True
+    cfg = http.get("/api/billing/config").json()
+    assert cfg["configured"] is False
+    assert cfg["test_mode"] is True
+    assert cfg["webhook_url"].endswith("/api/billing/webhook")
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_placeholder_not_a_real_key")
+    assert billing_mod.configured() is True
+    assert billing_mod.test_mode() is True
+    cfg = http.get("/api/billing/config").json()
+    assert cfg["configured"] is True
+    assert cfg["test_mode"] is True
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_placeholder_not_a_real_key")
+    assert billing_mod.configured() is True
+    assert billing_mod.test_mode() is False
+    cfg = http.get("/api/billing/config").json()
+    assert cfg["configured"] is True
+    assert cfg["test_mode"] is False
+
+
+def test_webhook_rejected_without_secret_on_locked_domain(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("PUBLIC_DOMAIN", "hermestudios.com")
+    monkeypatch.setenv("HERMES_REQUIRE_AUTH", "true")
+    monkeypatch.setenv("HERMES_API_KEY", "test-locked-key")
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setenv("HERMES_BILLING_STORE", str(tmp_path / "billing.json"))
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "campaigns.json"))
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "hermes.db"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    module = _load_app()
+    http = TestClient(module.app)
+    event = {
+        "id": "evt_unsigned",
+        "type": "checkout.session.completed",
+        "data": {"object": {"metadata": {"sku": "campaign_launch"}}},
+    }
+    res = http.post("/api/billing/webhook", content=json.dumps(event))
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert "STRIPE_WEBHOOK_SECRET" in detail
+    assert "hermestudios.com/api/billing/webhook" in detail

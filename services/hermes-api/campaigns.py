@@ -102,19 +102,57 @@ def save_db(db: dict[str, Any]) -> None:
             upsert_campaign_row(item)
 
 
+def campaign_label(campaign: dict[str, Any]) -> str:
+    if bool(campaign.get("healed")) or campaign.get("mode") == "dry_run":
+        return "DRY-RUN"
+    if campaign.get("mode") == "live":
+        return "live"
+    return str(campaign.get("label") or "pending")
+
+
+def publish_notes(campaign: dict[str, Any]) -> dict[str, Any]:
+    mpt = campaign.get("moneyprinter") if isinstance(campaign.get("moneyprinter"), dict) else {}
+    healed = bool(campaign.get("healed"))
+    label = str(mpt.get("label") or campaign_label(campaign))
+    paths = list(mpt.get("video_paths") or [])
+    return {
+        "label": label,
+        "mode": mpt.get("mode") or ("dry_run" if healed else campaign.get("mode") or "queued"),
+        "binary_upload": False,
+        "mpt_paths": paths,
+        "note": (
+            f"MoneyPrinterTurbo {label}"
+            + (f": {paths[:3]}" if paths else " (optional; :8088 DRY-RUN if down).")
+            + " No binary upload from hermes-api."
+        ),
+    }
+
+
+def decorate_campaign(campaign: dict[str, Any] | None) -> dict[str, Any] | None:
+    """UI-bindable fields. Does not call video_compose.execute."""
+    if not isinstance(campaign, dict):
+        return campaign
+    campaign["pipeline"] = campaign.get("pipeline") or "hermes-flywheel"
+    campaign["pipeline_yaml"] = "pipeline_defs/hermes-flywheel.yaml"
+    campaign["live_compose"] = False
+    campaign["label"] = campaign_label(campaign)
+    campaign["publish"] = publish_notes(campaign)
+    return campaign
+
+
 def list_campaigns() -> list[dict[str, Any]]:
     from db import list_campaign_rows
 
     items = list_campaign_rows()
     items.sort(key=lambda c: float(c.get("updated_at") or 0), reverse=True)
-    return items
+    return [decorate_campaign(item) or item for item in items]
 
 
 def get_campaign(campaign_id: str) -> dict[str, Any] | None:
     from db import get_campaign_row
 
     item = get_campaign_row(campaign_id)
-    return item if isinstance(item, dict) else None
+    return decorate_campaign(item) if isinstance(item, dict) else None
 
 
 def upsert_campaign(campaign: dict[str, Any]) -> dict[str, Any]:
@@ -167,7 +205,10 @@ def create_campaign(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "mode": "pending",
         "stage": None,
         "healed": False,
-        "pipeline": "hermes-video-campaign",
+        "label": "pending",
+        "pipeline": "hermes-flywheel",
+        "pipeline_yaml": "pipeline_defs/hermes-flywheel.yaml",
+        "live_compose": False,
         "created_at": now,
         "updated_at": now,
         "events": [],
@@ -176,6 +217,7 @@ def create_campaign(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "routing": {},
         "compose": {},
         "moneyprinter": {},
+        "publish": {},
     }
     return _upsert(campaign)
 
@@ -474,7 +516,10 @@ async def run_orchestra(
     campaign["status"] = "running"
     campaign["mode"] = "live"
     campaign["agent"] = "video-campaign"
-    campaign["pipeline"] = "hermes-video-campaign"
+    campaign["pipeline"] = "hermes-flywheel"
+    campaign["pipeline_yaml"] = "pipeline_defs/hermes-flywheel.yaml"
+    campaign["live_compose"] = False
+    campaign["label"] = "live"
     campaign = _append_event(
         campaign,
         {
@@ -586,6 +631,7 @@ async def run_orchestra(
                 used_dry = True
                 campaign["mode"] = "dry_run"
                 campaign["healed"] = True
+                campaign["label"] = "DRY-RUN"
                 if stage == "plan":
                     campaign["cuts"] = plan_cuts(campaign, dry=True)
                     result_text = _simulated_artifact("plan", campaign)
@@ -634,6 +680,9 @@ async def run_orchestra(
         )
     campaign["status"] = "completed_healed" if healed else "completed"
     campaign["stage"] = "done"
+    campaign["label"] = "DRY-RUN" if healed else "live"
+    campaign["live_compose"] = False
+    campaign["publish"] = publish_notes(campaign)
     campaign = _append_event(
         campaign,
         {

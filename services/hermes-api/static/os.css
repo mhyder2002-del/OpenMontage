@@ -75,6 +75,17 @@ body {
   border: 1px solid var(--line);
   margin-top: 0.7rem;
 }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+h1 { font-family: Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.04em; }
+.walk-thumb {
+  display: block;
+  margin-top: 0.85rem;
+  max-width: min(100%, 20rem);
+  height: auto;
+  border-radius: 0.55rem;
+  border: 1px solid var(--line);
+  background: #08080c;
+}
 .main { display: flex; flex-direction: column; min-width: 0; }
 .bar {
   display: flex;

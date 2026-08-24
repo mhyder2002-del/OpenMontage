@@ -61,7 +61,10 @@ def connect() -> Any:
         except ImportError as exc:
             raise RuntimeError(
                 "DATABASE_URL is set to Postgres but psycopg is not installed. "
-                "Default remains local SQLite; do not purchase hosted Postgres for this scaffold."
+                "pip install -r requirements.postgres.txt "
+                "(optional extra; SQLite remains the default). "
+                "Cost: $0 extra on existing VPS 187.77.98.177 vs advertised intro "
+                "~$6.49/mo new Hostinger KVM 1 (paid upfront). Do not buy a KVM."
             ) from exc
         parsed = urlparse(url)
         if not parsed.hostname:

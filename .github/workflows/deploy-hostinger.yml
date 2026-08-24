@@ -26,6 +26,9 @@ jobs:
         run: |
           docker compose -f services/hermes-api/docker-compose.yml config >/dev/null
           COMPOSE_PROFILES=tls docker compose -f services/hermes-api/docker-compose.yml config >/dev/null
+          COMPOSE_PROFILES=postgres docker compose -f services/hermes-api/docker-compose.yml config >/dev/null
+          docker compose -f services/hermes-api/docker-compose.yml config | grep -q 'postgres:' && exit 1 || true
+          COMPOSE_PROFILES=postgres docker compose -f services/hermes-api/docker-compose.yml config | grep -q 'postgres:'
       - id: meta
         run: echo "image_ref=ghcr.io/${{ github.repository_owner }}/hermes-api:${{ github.sha }}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
@@ -48,7 +51,25 @@ jobs:
           host: ${{ vars.HOSTINGER_VPS_IP }}
           username: root
           key: ${{ secrets.HOSTINGER_SSH_KEY }}
-          source: "services/hermes-api/docker-compose.yml,services/hermes-api/Dockerfile,services/hermes-api/Caddyfile,services/hermes-api/app.py,services/hermes-api/requirements.txt,services/hermes-api/.dockerignore,services/hermes-api/static/*"
+          source: >-
+            services/hermes-api/docker-compose.yml,
+            services/hermes-api/docker-compose.hosted.yml,
+            services/hermes-api/Dockerfile,
+            services/hermes-api/Caddyfile,
+            services/hermes-api/.dockerignore,
+            services/hermes-api/requirements.txt,
+            services/hermes-api/requirements.billing.txt,
+            services/hermes-api/requirements.postgres.txt,
+            services/hermes-api/app.py,
+            services/hermes-api/billing.py,
+            services/hermes-api/campaigns.py,
+            services/hermes-api/flywheel.py,
+            services/hermes-api/db.py,
+            services/hermes-api/research.py,
+            services/hermes-api/moneyprinter.py,
+            services/hermes-api/walking_skeleton.py,
+            services/hermes-api/agents/**,
+            services/hermes-api/static/**
           target: /opt/hermes-api
           strip_components: 2
           timeout: 60s

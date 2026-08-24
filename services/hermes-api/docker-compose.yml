@@ -25,6 +25,11 @@ services:
       HERMES_AGENT_INFER_TIMEOUT: ${HERMES_AGENT_INFER_TIMEOUT:-8}
       HERMES_CAMPAIGN_STORE: ${HERMES_CAMPAIGN_STORE:-/app/data/campaigns.json}
       HERMES_DB_PATH: ${HERMES_DB_PATH:-/app/data/hermes.db}
+      # Empty by default (SQLite). With --profile postgres set:
+      # DATABASE_URL=postgresql://hermes:hermes@postgres:5432/hermes
+      # Cost: $0 extra on existing VPS 187.77.98.177 vs advertised intro ~$6.49/mo
+      # new Hostinger KVM 1 (paid upfront). Do not buy a KVM. Do not start this
+      # profile on prod until confirmed.
       DATABASE_URL: ${DATABASE_URL:-}
       HERMES_RESEARCH_TIMEOUT: ${HERMES_RESEARCH_TIMEOUT:-4}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
@@ -56,6 +61,28 @@ services:
           "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/readyz', timeout=2)",
         ]
       interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Optional. Does not start on default `docker compose up` (not on VPS 187.77.98.177).
+  # Enable later, after cost OK ($0 extra on that box vs ~$6.49/mo new KVM 1 upfront):
+  #   COMPOSE_PROFILES=postgres DATABASE_URL=postgresql://hermes:hermes@postgres:5432/hermes \
+  #     docker compose up -d
+  # Do NOT run `docker compose up postgres` on the VPS until that OK.
+  postgres:
+    profiles: ["postgres"]
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hermes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hermes}
+      POSTGRES_DB: ${POSTGRES_DB:-hermes}
+    volumes:
+      - hermes_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
@@ -96,5 +123,6 @@ services:
 
 volumes:
   hermes_data:
+  hermes_pg:
   caddy_data:
   caddy_config:

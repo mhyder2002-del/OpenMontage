@@ -1,0 +1,4 @@
+# Optional extra. Install when DATABASE_URL starts with postgres:
+#   pip install -r requirements.txt -r requirements.billing.txt -r requirements.postgres.txt
+# Do not start the compose postgres profile on the VPS until that option is confirmed.
+psycopg[binary]>=3.1

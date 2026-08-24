@@ -69,6 +69,84 @@
     return fetch(url, { ...opts, headers });
   }
 
+  function lockedHost() {
+    const h = (location.hostname || "").toLowerCase();
+    return h.endsWith("hermestudios.com") || h.endsWith("hermestudios.online") || h.endsWith("hermestudios.org");
+  }
+
+  function mutatingNeedsBearer() {
+    return lockedHost() && !getApiKey();
+  }
+
+  function disableControl(el, reason) {
+    if (!el || el.tagName === "A") return;
+    el.disabled = true;
+    el.setAttribute("title", reason);
+  }
+
+  function gateMutating() {
+    if (!mutatingNeedsBearer()) return;
+    const reason = "Needs Bearer HERMES_API_KEY in Settings (production host)";
+    ["#walk-run", "#flywheel-start", "#flywheel-stop", "#agents-tick", "#dry-run"].forEach((sel) => {
+      disableControl(document.querySelector(sel), reason);
+    });
+    document.querySelectorAll("#campaign-form button[type=submit]").forEach((b) => disableControl(b, reason));
+    const header = document.getElementById("launch-campaign");
+    if (header) header.setAttribute("title", reason);
+    const badge = document.getElementById("auth-badge");
+    if (badge) badge.innerHTML = "<i aria-hidden=\"true\"></i> Needs Bearer";
+  }
+
+  function gateStripe() {
+    if (window.__stripeConfigured) return;
+    document.querySelectorAll("[data-pay], [data-subscribe]").forEach((b) => {
+      disableControl(b, "Stripe not configured");
+    });
+  }
+
+  function setChip(id, text, ok) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("ok", !!ok);
+    el.classList.toggle("warn", !ok);
+  }
+
+  async function loadLiveStrip() {
+    try {
+      const rz = await fetch("/readyz");
+      const body = await rz.json().catch(() => ({}));
+      setChip("pill-readyz", "/readyz " + rz.status, rz.ok && body.ok);
+    } catch {
+      setChip("pill-readyz", "readyz down", false);
+    }
+    try {
+      const h = await fetch("/health");
+      const data = await h.json();
+      const inf = (data.inference || {}).reachable;
+      setChip("pill-health", inf ? "inference up" : "inference down", h.ok);
+    } catch {
+      setChip("pill-health", "health down", false);
+    }
+    try {
+      const f = await fetch("/api/flywheel");
+      const data = await f.json();
+      setChip(
+        "pill-flywheel",
+        "flywheel " + (data.running ? "running" : "stopped") + " · " + (data.cycle_count || 0),
+        f.ok
+      );
+    } catch {
+      setChip("pill-flywheel", "flywheel n/a", false);
+    }
+    const badge = document.getElementById("auth-badge");
+    if (badge && !mutatingNeedsBearer()) {
+      badge.innerHTML = getApiKey()
+        ? "<i aria-hidden=\"true\"></i> Bearer session"
+        : "<i aria-hidden=\"true\"></i> Public GET";
+    }
+  }
+
   const topics = [
     { name: "Automation", competition: 0.5, velocity: 0.82, viral: 0.7, conf: 0.82 },
     { name: "Claude", competition: 0.61, velocity: 0.88, viral: 0.74, conf: 0.9 },
@@ -88,8 +166,27 @@
     ["Hermes OS — Platform Promo", "hermes_os_promo · 4 scenes · 12.6s"],
   ];
 
+  const WALK_PLACEHOLDER = "/static/placeholders/walking-skeleton.svg";
+
   function metric(label, value, hint, accent) {
     return `<article class="card${accent ? " accent" : ""}"><span class="lbl">${label}</span><div class="val${accent ? " green" : ""}">${value}</div><div class="hint">${hint}</div></article>`;
+  }
+
+  function walkPanelHtml() {
+    return `
+        <section class="card" style="margin-top:0.75rem" id="walk-panel">
+          <h2>Campaigns / Studio · walking skeleton</h2>
+          <p class="muted">POST /api/v1/scripts → /api/v1/storyboards → /api/v1/thumbnails. Save a Bearer key under Settings first.</p>
+          <form class="form" id="walk-form" style="margin-top:0.8rem">
+            <label>Topic <input id="walk-topic" name="topic" value="AI education" autocomplete="off" /></label>
+            <label>Audience <input id="walk-audience" name="audience" value="founders" autocomplete="off" /></label>
+            <button class="btn primary" type="submit" id="walk-run">Generate script → storyboard → thumbnail</button>
+          </form>
+          <p class="muted" id="walk-status" style="margin-top:0.6rem">Ready. Thumbnail shows ${WALK_PLACEHOLDER} until the chain returns thumbnail_url.</p>
+          <pre class="status" id="walk-script" style="margin-top:0.7rem;white-space:pre-wrap" hidden></pre>
+          <div id="walk-scenes"></div>
+          <img id="walk-thumb" alt="Walking skeleton thumbnail" src="${WALK_PLACEHOLDER}" width="320" height="180" style="display:block;margin-top:0.85rem;max-width:min(100%,20rem);border-radius:0.55rem;border:1px solid var(--line,#26262e);background:#08080c" />
+        </section>`;
   }
 
   function views() {
@@ -111,7 +208,8 @@
         </section>
         <section class="card" style="margin-top:0.75rem">
           <h2 class="section-h" style="margin:0 0 0.6rem">Plans</h2>
-          <p class="muted">One-time campaign packs and Autonomous v0.4.0 sit on Stripe Checkout (test mode until you approve live).</p>
+          <p class="muted" id="billing-copy">Checkout mode comes from GET /api/billing/config (live when configured and not test_mode).</p>
+          <p class="muted" id="billing-status">Loading Stripe…</p>
           <div class="actions" style="margin-top:0.7rem">
             <button class="btn primary" type="button" data-pay="campaign_launch">Pay campaign launch</button>
             <button class="btn" type="button" data-subscribe>Subscribe console</button>
@@ -200,7 +298,8 @@
             <h2 style="margin-top:1rem">Campaigns</h2>
             <div id="active-campaigns"><p class="empty">Loading campaigns…</p></div>
           </section>
-        </div>`,
+        </div>
+        ${walkPanelHtml()}`,
       orchestra: `
         <section class="card">
           <h2>Category orchestra</h2>
@@ -252,10 +351,15 @@
           <h2>Studio agent</h2>
           <p class="muted" id="agent-feed">Loading /api/agents/studio…</p>
         </section>
+        ${walkPanelHtml()}
         <section class="card" style="margin-top:0.75rem">
           <h2>Timeline</h2>
           <p class="muted">Hook → proof → payoff. 7-scene EDC cut at 20s, or a 4-scene Hermes OS promo at 12.6s.</p>
           <div class="flow" style="margin-top:1rem">${["Hook","Problem","Demo","Proof","CTA"].map((n)=>`<span>${n}</span><i>→</i>`).join("")}<span class="end">Export</span></div>
+          <div class="actions" style="margin-top:0.8rem">
+            <a class="btn primary" href="#/campaigns">Plan cuts in Campaigns</a>
+            <a class="btn" href="#/publishing">Publishing queue</a>
+          </div>
         </section>
         <div class="grid split" style="margin-top:0.75rem">
           <section class="card"><h2>Active cut</h2><p class="muted">hermes_os_promo · 1920×1080 · 30 fps</p></section>
@@ -297,6 +401,9 @@
         </section>`,
       command: `
         <p class="muted" id="agent-feed">Loading /api/agents/command…</p>
+        <div class="chips" id="runtime-chips" style="margin:0 0 0.75rem">
+          <span class="chip">livez…</span>
+        </div>
         <section class="card">
           <h2>/readyz</h2>
           <pre class="status" id="readyz-pre">checking…</pre>
@@ -308,6 +415,11 @@
         <section class="card" style="margin-top:0.75rem">
           <h2>Ops</h2>
           <p class="muted">/livez process up · /readyz production key present · /health inference + models · /docs OpenAPI. GET /health and /console stay public without a key.</p>
+          <div class="actions" style="margin-top:0.7rem">
+            <button class="btn primary" type="button" id="refresh-runtime">Refresh runtime</button>
+            <a class="btn" href="/docs">Open /docs</a>
+            <a class="btn" href="/livez">Open /livez</a>
+          </div>
         </section>`,
       publishing: `
         <section class="card">
@@ -325,7 +437,11 @@
         </section>
         <section class="card" style="margin-top:0.75rem">
           <h2>Drop zone</h2>
-          <p class="muted">Brand kits, stills, and source clips land here before Studio. Nothing is a dead file — uploads become graph nodes.</p>
+          <p class="muted">Brand kits, stills, and source clips land here before Studio. Binary YouTube upload stays on the studio Mac CLI — this control is disabled on purpose.</p>
+          <div class="actions" style="margin-top:0.7rem">
+            <button class="btn" type="button" id="upload-stub" disabled title="Binary upload stays on the studio Mac CLI">Upload file</button>
+            <a class="btn" href="#/studio">Open Studio</a>
+          </div>
         </section>`,
       settings: `
         <section class="card">
@@ -353,6 +469,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
         <section class="card" style="margin-top:0.75rem" id="billing-panel">
           <h2>Billing</h2>
           <p class="muted" id="billing-status">Loading Stripe catalog…</p>
+          <p class="muted" id="billing-copy"></p>
           <div class="actions" style="margin-top:0.7rem">
             <button class="btn primary" type="button" data-pay="campaign_launch">Pay campaign launch</button>
             <button class="btn" type="button" data-pay="credit_pack">Buy credit pack</button>
@@ -410,16 +527,16 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       a.classList.toggle("active", a.getAttribute("href") === `#/${page.id}`);
     });
     if (page.id === "command") loadHealth();
-    if (page.id === "settings") {
-      paintApiKeyStatus();
-      loadBilling();
-    }
+    if (page.id === "settings") paintApiKeyStatus();
+    if (page.id === "settings" || page.id === "overview" || page.id === "evolution" || page.id === "campaigns") loadBilling();
     if (page.id === "overview" || page.id === "evolution") loadFlywheel();
     if (page.id === "overview" || page.id === "discovery" || page.id === "knowledge") loadKnowledge();
     loadAgent(page.id);
     bindPage(page.id);
     bindBilling();
     bindSettings();
+    loadLiveStrip();
+    gateMutating();
   }
 
   function eventHtml(events) {
@@ -536,18 +653,41 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     return campaign;
   }
 
+  function paintBillingUi(data) {
+    const el = document.getElementById("billing-status");
+    const copy = document.getElementById("billing-copy");
+    const skus = (data.products || []).map((p) => p.sku).join(", ");
+    const live = Boolean(data.configured) && data.test_mode === false;
+    if (el) {
+      if (live) {
+        el.innerHTML = `Stripe <strong>live</strong> · ${skus}`;
+      } else if (data.configured) {
+        el.textContent = `Stripe test · ${skus}`;
+      } else {
+        el.textContent = `Stripe not configured. ${data.hint || "Set STRIPE_SECRET_KEY (sk_test_… or sk_live_…)"}`;
+      }
+    }
+    if (copy) {
+      copy.textContent = live
+        ? "Checkout is live (not test_mode). Keys stay on the server; this page only reads public /api/billing/config."
+        : data.configured
+          ? "Stripe Checkout is in test mode (sk_test_)."
+          : "One-time campaign packs and Autonomous v0.4.0 sit on Stripe Checkout once a secret key is set.";
+    }
+  }
+
   async function loadBilling() {
     const el = document.getElementById("billing-status");
-    if (!el) return;
     try {
       const r = await fetch("/api/billing/config");
       const data = await r.json();
-      const skus = (data.products || []).map((p) => p.sku).join(", ");
-      el.textContent = data.configured
-        ? `Stripe ${data.test_mode ? "test" : "live"} · ${skus}`
-        : `Stripe not configured. ${data.hint || "Set STRIPE_SECRET_KEY=sk_test_..."}`;
+      window.__stripeConfigured = Boolean(data.configured);
+      paintBillingUi(data);
+      gateStripe();
     } catch (err) {
-      el.textContent = String(err);
+      window.__stripeConfigured = false;
+      if (el) el.textContent = String(err);
+      gateStripe();
     }
   }
 
@@ -594,6 +734,68 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
           if (toast) toast.textContent = String(err);
         }
       });
+    });
+  }
+
+  function bindWalking() {
+    const form = document.getElementById("walk-form");
+    if (!form) return;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const status = document.getElementById("walk-status");
+      const scriptEl = document.getElementById("walk-script");
+      const scenesEl = document.getElementById("walk-scenes");
+      const img = document.getElementById("walk-thumb");
+      const topic = (document.getElementById("walk-topic") || {}).value || "AI";
+      const audience = (document.getElementById("walk-audience") || {}).value || "";
+      const fail = (step, r, body) => {
+        const detail = body.detail || body.error || JSON.stringify(body);
+        if (status) status.textContent = `${step} ${r.status} · ${detail}`;
+      };
+      try {
+        if (status) status.textContent = "POST /api/v1/scripts…";
+        const scriptRes = await apiFetch("/api/v1/scripts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic, audience }),
+        });
+        const script = await scriptRes.json().catch(() => ({}));
+        if (!scriptRes.ok) return fail("scripts", scriptRes, script);
+        if (scriptEl) {
+          scriptEl.hidden = false;
+          scriptEl.textContent = script.script || "";
+        }
+        if (status) status.textContent = `script ${script.script_id} · POST /api/v1/storyboards…`;
+        const boardRes = await apiFetch("/api/v1/storyboards", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ script_id: script.script_id }),
+        });
+        const board = await boardRes.json().catch(() => ({}));
+        if (!boardRes.ok) return fail("storyboards", boardRes, board);
+        if (scenesEl) {
+          const scenes = board.scenes || [];
+          scenesEl.innerHTML = scenes.length
+            ? scenes.map((s) => `<div class="row"><div><h3>${s.title || `Scene ${s.index}`}</h3><div class="muted">${s.visual || ""} · ${s.duration_s || 6}s</div></div></div>`).join("")
+            : "";
+        }
+        if (status) status.textContent = `storyboard ${board.storyboard_id} · POST /api/v1/thumbnails…`;
+        const thumbRes = await apiFetch("/api/v1/thumbnails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script_id: script.script_id,
+            storyboard_id: board.storyboard_id,
+          }),
+        });
+        const thumb = await thumbRes.json().catch(() => ({}));
+        if (!thumbRes.ok) return fail("thumbnails", thumbRes, thumb);
+        const url = thumb.thumbnail_url || WALK_PLACEHOLDER;
+        if (img) img.src = url;
+        if (status) status.textContent = `thumbnail_url ${url}`;
+      } catch (err) {
+        if (status) status.textContent = String(err);
+      }
     });
   }
 
@@ -648,6 +850,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
         if (el) el.textContent = String(err);
       }
     });
+    bindWalking();
     document.querySelectorAll("[data-research]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const topic = btn.getAttribute("data-research") || btn.textContent.trim();
@@ -670,6 +873,11 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
           if (status) status.textContent = String(err);
         }
       });
+    });
+    document.getElementById("refresh-runtime")?.addEventListener("click", () => {
+      loadHealth();
+      loadLiveStrip();
+      loadFlywheel();
     });
     document.getElementById("dry-run")?.addEventListener("click", async () => {
       const stream = document.getElementById("event-stream");
@@ -829,6 +1037,17 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
         el.textContent = `${path} ${String(err)}`;
       }
     }
+    const chips = document.getElementById("runtime-chips");
+    try {
+      const lz = await fetch("/livez");
+      const live = await lz.json().catch(() => ({}));
+      if (chips) {
+        chips.innerHTML = `<span class="chip on">/livez ${lz.status}${live.ok ? " ok" : ""}</span>
+          <span class="chip">GET /readyz · /health public</span>`;
+      }
+    } catch (err) {
+      if (chips) chips.innerHTML = `<span class="chip">${String(err)}</span>`;
+    }
     await Promise.all([paint("readyz-pre", "/readyz"), paint("health-pre", "/health")]);
   }
 
@@ -862,7 +1081,12 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     enterConsole();
   });
   document.getElementById("open-cmd").addEventListener("click", openPalette);
+  splash.querySelector("video")?.addEventListener("click", (e) => e.stopPropagation());
   document.getElementById("launch-campaign").addEventListener("click", async () => {
+    if (mutatingNeedsBearer()) {
+      location.hash = "#/settings";
+      return;
+    }
     location.hash = "#/campaigns";
     await new Promise((resolve) => setTimeout(resolve, 0));
     const form = document.getElementById("campaign-form");
@@ -923,4 +1147,5 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     sessionStorage.setItem("hermes-entered", "1");
     enterConsole();
   }
+  setInterval(loadLiveStrip, 12000);
 })();

@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />
@@ -81,9 +81,14 @@
           <a href="#/uploads">Uploads</a>
           <a href="#/settings">Settings</a>
         </nav>
+        <div class="live-strip" id="live-strip" aria-live="polite">
+          <span class="status-chip" id="pill-readyz">readyz…</span>
+          <span class="status-chip" id="pill-health">health…</span>
+          <span class="status-chip" id="pill-flywheel">flywheel…</span>
+        </div>
         <div class="side-foot">
           <span>v0.4.0</span>
-          <span class="badge"><i aria-hidden="true"></i> Autonomous</span>
+          <span class="badge" id="auth-badge"><i aria-hidden="true"></i> Public GET</span>
         </div>
       </aside>
       <div class="workspace">

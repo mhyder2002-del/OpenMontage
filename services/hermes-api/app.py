@@ -345,6 +345,20 @@ def _lm_health() -> dict[str, Any]:
     }
 
 
+def _flywheel_public() -> dict[str, Any]:
+    """Bindable flywheel JSON: inference_down even before the first tick."""
+    snap = flywheel_snapshot()
+    lm = _lm_health()
+    inference_down = bool(snap.get("inference_down")) or lm.get("reachable") is False
+    snap["inference_down"] = inference_down
+    if inference_down:
+        if snap.get("label") in {None, "idle"}:
+            snap["label"] = "DRY-RUN"
+        if snap.get("mode") in {None, "idle"}:
+            snap["mode"] = "dry_run"
+    return snap
+
+
 @app.get("/")
 def index() -> FileResponse:
     index_path = STATIC_DIR / "index.html"
@@ -387,7 +401,7 @@ def readyz() -> dict[str, Any]:
 @app.get("/health")
 def health() -> dict[str, Any]:
     lm = _lm_health()
-    fw = flywheel_snapshot()
+    fw = _flywheel_public()
     ag = agents_snapshot()
     return {
         "ok": True,
@@ -411,6 +425,12 @@ def health() -> dict[str, Any]:
             "cycle_count": fw.get("cycle_count"),
             "origin": fw.get("origin"),
             "last_self_check": fw.get("last_self_check") or {},
+            "inference_down": bool(fw.get("inference_down")),
+            "healed": bool(fw.get("healed")),
+            "mode": fw.get("mode"),
+            "label": fw.get("label"),
+            "last_tick": fw.get("last_tick"),
+            "pipeline": fw.get("pipeline"),
         },
         "agents": {
             "count": ag.get("count"),
@@ -517,6 +537,9 @@ def api_status() -> dict[str, Any]:
         "campaigns": "/api/campaigns",
         "billing": "/api/billing/config",
         "flywheel": "/api/flywheel",
+        "flywheel_start": "POST /api/flywheel/start",
+        "campaign_launch": "POST /api/campaigns",
+        "pipeline": "hermes-flywheel",
         "agents": "/api/agents",
         "research": "/api/agent/research",
         "knowledge": "/api/knowledge/nodes",
@@ -585,7 +608,18 @@ def _campaign_or_404(campaign_id: str) -> dict[str, Any]:
 
 @app.get("/api/campaigns")
 def api_list_campaigns() -> dict[str, Any]:
-    return {"campaigns": list_campaigns()}
+    items = list_campaigns()
+    fw = _flywheel_public()
+    return {
+        "campaigns": items,
+        "engine": {
+            "pipeline": "hermes-flywheel",
+            "live_compose": False,
+            "inference_down": bool(fw.get("inference_down")),
+            "flywheel_label": fw.get("label"),
+            "flywheel_healed": bool(fw.get("healed")),
+        },
+    }
 
 
 def _research_infer() -> Any:
@@ -722,7 +756,7 @@ def api_get_campaign(campaign_id: str) -> dict[str, Any]:
 
 @app.get("/api/flywheel")
 def api_flywheel() -> dict[str, Any]:
-    return flywheel_snapshot()
+    return _flywheel_public()
 
 
 @app.post("/api/flywheel/start")
@@ -730,14 +764,15 @@ async def api_flywheel_start(authorization: str | None = Header(default=None)) -
     _require_mutating_api_auth(authorization)
     snap = flywheel_start()
     _ensure_flywheel_task()
-    return snap
+    return _flywheel_public() if snap else snap
 
 
 @app.get("/api/flywheel/stop")
 @app.post("/api/flywheel/stop")
 def api_flywheel_stop(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     _require_mutating_api_auth(authorization)
-    return flywheel_stop()
+    flywheel_stop()
+    return _flywheel_public()
 
 
 @app.get("/api/agents")
@@ -852,6 +887,11 @@ def api_campaign_events(campaign_id: str) -> dict[str, Any]:
         "status": campaign.get("status"),
         "mode": campaign.get("mode"),
         "healed": campaign.get("healed"),
+        "label": campaign.get("label"),
+        "pipeline": campaign.get("pipeline") or "hermes-flywheel",
+        "live_compose": False,
+        "publish": campaign.get("publish") or {},
+        "moneyprinter": campaign.get("moneyprinter") or {},
         "agent": campaign.get("agent") or "video-campaign",
         "cuts": campaign.get("cuts") or [],
         "events": campaign.get("events") or [],

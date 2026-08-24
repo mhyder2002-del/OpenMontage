@@ -100,6 +100,21 @@ def save_state(state: dict[str, Any]) -> dict[str, Any]:
 def snapshot() -> dict[str, Any]:
     state = load_state()
     ticks = state.get("ticks") or []
+    last_tick = ticks[-1] if ticks else None
+    check = state.get("last_self_check") or {}
+    if not isinstance(check, dict):
+        check = {}
+    if not isinstance(last_tick, dict):
+        last_tick = None
+    inference_down = bool(check.get("inference_down"))
+    healed = bool((last_tick or {}).get("healed"))
+    mode = str((last_tick or {}).get("mode") or check.get("mode") or "idle")
+    if inference_down or healed or mode == "dry_run":
+        label = "DRY-RUN"
+    elif mode == "live":
+        label = "live"
+    else:
+        label = "idle"
     return {
         "running": bool(state.get("running")) and not bool(state.get("stop_requested")),
         "stop_requested": bool(state.get("stop_requested")),
@@ -107,11 +122,25 @@ def snapshot() -> dict[str, Any]:
         "max_concurrent": 1,
         "origin": advertised_origin(),
         "origin_note": origin_note_for(advertised_origin()),
-        "last_self_check": state.get("last_self_check") or {},
+        "last_self_check": check,
         "last_campaign_id": state.get("last_campaign_id"),
         "active_campaign_id": state.get("active_campaign_id"),
         "ticks": ticks[-20:],
         "tick_total": len(ticks),
+        "last_tick": last_tick,
+        "inference_down": inference_down,
+        "healed": healed,
+        "mode": mode,
+        "label": label,
+        "pipeline": "hermes-flywheel",
+        "pipeline_yaml": "pipeline_defs/hermes-flywheel.yaml",
+        "live_compose": False,
+        "operator": {
+            "start": "POST /api/flywheel/start",
+            "stop": "POST /api/flywheel/stop",
+            "launch": "POST /api/campaigns",
+            "launch_queued": "POST /api/campaigns/{id}/launch",
+        },
     }
 
 
@@ -227,6 +256,7 @@ async def run_one_tick(
             "self_check_ok": check.get("ok"),
             "inference_down": check.get("inference_down"),
             "mode": "dry_run",
+            "label": "DRY-RUN",
             "note": f"Campaign persist failed; labeled dry-run ({type(exc).__name__}).",
             "agents": {
                 "ok": bool((agent_tick or {}).get("ok")),
@@ -254,6 +284,8 @@ async def run_one_tick(
         raise
     status = str(result.get("status") or "")
     healed = bool(result.get("healed"))
+    mode = result.get("mode") or check.get("mode")
+    inference_down = bool(check.get("inference_down"))
     tick = {
         "ts": time.time(),
         "cycle": int(load_state().get("cycle_count") or 0) + 1,
@@ -261,8 +293,9 @@ async def run_one_tick(
         "status": status,
         "healed": healed,
         "self_check_ok": check.get("ok"),
-        "inference_down": check.get("inference_down"),
-        "mode": result.get("mode") or check.get("mode"),
+        "inference_down": inference_down,
+        "mode": mode,
+        "label": "DRY-RUN" if healed or inference_down or mode == "dry_run" else "live",
         "agents": {
             "ok": bool((agent_tick or {}).get("ok")),
             "count": len((agent_tick or {}).get("results") or []),
