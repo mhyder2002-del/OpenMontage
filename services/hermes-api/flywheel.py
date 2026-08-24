@@ -8,10 +8,27 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from billing import public_origin
 from campaigns import create_campaign, list_campaigns
 
 _DEFAULT_STORE = Path(__file__).resolve().parent / "data" / "flywheel.json"
-CANONICAL_ORIGIN = "http://127.0.0.1:8091"
+
+
+def advertised_origin() -> str:
+    return public_origin()
+
+
+def origin_note_for(origin: str) -> str:
+    if "127.0.0.1" in origin or "localhost" in origin:
+        return (
+            "Single console origin is http://127.0.0.1:8091. "
+            "If the port is stale, restart one uvicorn there — do not bind a second origin."
+        )
+    return f"Public origin is {origin}."
+
+
+# Local default when imported without env; call advertised_origin() at request time.
+CANONICAL_ORIGIN = advertised_origin()
 SELF_CHECK_PATHS = (
     "/livez",
     "/readyz",
@@ -43,11 +60,8 @@ def _empty() -> dict[str, Any]:
         "stop_requested": False,
         "cycle_count": 0,
         "max_concurrent": 1,
-        "origin": CANONICAL_ORIGIN,
-        "origin_note": (
-            "Single console origin is http://127.0.0.1:8091. "
-            "If the port is stale, restart one uvicorn there — do not bind a second origin."
-        ),
+        "origin": advertised_origin(),
+        "origin_note": origin_note_for(advertised_origin()),
         "last_self_check": {},
         "last_campaign_id": None,
         "active_campaign_id": None,
@@ -91,8 +105,8 @@ def snapshot() -> dict[str, Any]:
         "stop_requested": bool(state.get("stop_requested")),
         "cycle_count": int(state.get("cycle_count") or 0),
         "max_concurrent": 1,
-        "origin": CANONICAL_ORIGIN,
-        "origin_note": state.get("origin_note"),
+        "origin": advertised_origin(),
+        "origin_note": origin_note_for(advertised_origin()),
         "last_self_check": state.get("last_self_check") or {},
         "last_campaign_id": state.get("last_campaign_id"),
         "active_campaign_id": state.get("active_campaign_id"),

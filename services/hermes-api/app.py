@@ -30,6 +30,7 @@ from billing import (
     entitlements as billing_entitlements,
     not_configured_payload,
     public_config as billing_public_config,
+    public_origin,
     record_usage,
 )
 from campaigns import (
@@ -42,7 +43,6 @@ from campaigns import (
     upsert_campaign,
 )
 from flywheel import (
-    CANONICAL_ORIGIN,
     SELF_CHECK_PATHS,
     request_start as flywheel_start,
     request_stop as flywheel_stop,
@@ -381,7 +381,7 @@ def health() -> dict[str, Any]:
         "domain": _public_domain(),
         "uptime_seconds": round(time.monotonic() - START_MONOTONIC, 1),
         "auth_configured": bool(_api_key()),
-        "origin": CANONICAL_ORIGIN,
+        "origin": public_origin(),
         "inference": {
             "backend": lm["backend"],
             "reachable": lm["reachable"],
@@ -507,7 +507,7 @@ def api_status() -> dict[str, Any]:
         "research": "/api/agent/research",
         "knowledge": "/api/knowledge/nodes",
         "stripe_configured": stripe_configured(),
-        "origin": CANONICAL_ORIGIN,
+        "origin": public_origin(),
     }
 
 
