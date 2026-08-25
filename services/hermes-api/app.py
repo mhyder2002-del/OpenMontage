@@ -54,7 +54,14 @@ from flywheel import (
 from agents.orchestrator import snapshot as agents_snapshot
 from agents.orchestrator import snapshot_category as agents_snapshot_category
 from agents.orchestrator import tick_all as agents_tick_all
-from db import get_job, knowledge_graph, list_debug_events, list_knowledge_nodes
+from db import (
+    get_job,
+    knowledge_graph,
+    list_debug_events,
+    list_knowledge_nodes,
+    list_sqlite_backups,
+    snapshot_sqlite,
+)
 from research import recency_score, run_research, wikipedia_summary
 from moneyprinter import status_snapshot as moneyprinter_status
 from product import (
@@ -63,11 +70,13 @@ from product import (
     compounding_analytics,
     discovery_payload,
     evolution_lab,
+    ingest_scanned_opportunities,
     jobs_payload,
     memory_payload,
     promote_variant,
     workforce_snapshot,
 )
+from scrapers import scan_public_feeds
 from walking_skeleton import (
     GenerateScriptRequest,
     GenerateStoryboardRequest,
@@ -388,6 +397,28 @@ def console() -> FileResponse:
     return FileResponse(console_path)
 
 
+def _legal_page(name: str) -> FileResponse:
+    path = STATIC_DIR / "legal" / f"{name}.html"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Legal page missing")
+    return FileResponse(path)
+
+
+@app.get("/terms")
+def terms() -> FileResponse:
+    return _legal_page("terms")
+
+
+@app.get("/privacy")
+def privacy() -> FileResponse:
+    return _legal_page("privacy")
+
+
+@app.get("/refunds")
+def refunds() -> FileResponse:
+    return _legal_page("refunds")
+
+
 @app.get("/livez")
 def livez() -> dict[str, Any]:
     """Process liveness — never probes upstream inference."""
@@ -567,6 +598,11 @@ def api_status() -> dict[str, Any]:
         "evolution": "/api/evolution",
         "debugger": "/api/debugger",
         "jobs": "/api/jobs",
+        "discovery_scan": "/api/discovery/scan",
+        "backups": "/api/ops/backup",
+        "terms": "/terms",
+        "privacy": "/privacy",
+        "refunds": "/refunds",
         "orchestra_pipeline": "/api/orchestra/pipeline",
         "memory": "/api/memory",
         "stripe_configured": stripe_configured(),
@@ -767,6 +803,42 @@ def api_discovery(request: Request) -> dict[str, Any]:
         topics.append(topic)
     extra = discovery_payload(topics)
     return {"topics": topics, "count": len(topics), **extra}
+
+
+@app.post("/api/discovery/scan")
+async def api_discovery_scan(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Refresh opportunities from unpaid public feeds. Does not call video_compose."""
+    _require_mutating_api_auth(authorization)
+    query = ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            query = str(body.get("query") or body.get("topic") or "")
+    except Exception:
+        query = ""
+    scanned = scan_public_feeds(query=query or None)
+    stored = ingest_scanned_opportunities(list(scanned.get("items") or []))
+    return {
+        **scanned,
+        "stored": len(stored),
+        "opportunities": stored,
+        "pipeline": "hermes-flywheel",
+        "live_compose": False,
+    }
+
+
+@app.get("/api/ops/backup")
+def api_ops_backup_list() -> dict[str, Any]:
+    return {"ok": True, "backend": "sqlite", "backups": list_sqlite_backups()}
+
+
+@app.post("/api/ops/backup")
+def api_ops_backup_create(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    return snapshot_sqlite()
 
 
 @app.get("/api/analytics")

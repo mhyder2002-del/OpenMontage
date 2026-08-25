@@ -1321,6 +1321,60 @@ def list_pipeline_agents(campaign_id: str | None = None) -> list[dict[str, Any]]
     return [_as_dict(row, keys) for row in rows]
 
 
+def backup_dir() -> Path:
+    raw = (os.environ.get("HERMES_BACKUP_DIR") or "").strip()
+    if raw:
+        path = Path(raw)
+    else:
+        path = sqlite_path().parent / "backups"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def list_sqlite_backups() -> list[dict[str, Any]]:
+    folder = backup_dir()
+    rows: list[dict[str, Any]] = []
+    for path in sorted(folder.glob("hermes-*.db"), reverse=True):
+        stat = path.stat()
+        rows.append(
+            {
+                "name": path.name,
+                "bytes": int(stat.st_size),
+                "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                .replace(microsecond=0)
+                .isoformat(),
+            }
+        )
+    return rows[:40]
+
+
+def snapshot_sqlite() -> dict[str, Any]:
+    """Copy the SQLite file into data/backups. Postgres stays a no-op until you enable it."""
+    if backend_name() != "sqlite":
+        return {
+            "ok": False,
+            "backend": backend_name(),
+            "error": "sqlite-only",
+            "note": "Postgres backup is not enabled. Do not buy a Hostinger KVM for this.",
+        }
+    src = sqlite_path()
+    ensure_db()
+    if not src.is_file():
+        return {"ok": False, "backend": "sqlite", "error": "missing-db"}
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest = backup_dir() / f"hermes-{stamp}.db"
+    import shutil
+
+    shutil.copy2(src, dest)
+    return {
+        "ok": True,
+        "backend": "sqlite",
+        "path": dest.name,
+        "bytes": int(dest.stat().st_size),
+        "backups": list_sqlite_backups(),
+    }
+
+
 def reset_migrate_flag() -> None:
     global _migrated
     _migrated = False

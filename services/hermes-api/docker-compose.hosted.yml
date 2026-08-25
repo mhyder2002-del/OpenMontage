@@ -25,6 +25,8 @@ services:
       HERMES_AGENT_INFER_TIMEOUT: ${HERMES_AGENT_INFER_TIMEOUT:-8}
       HERMES_CAMPAIGN_STORE: ${HERMES_CAMPAIGN_STORE:-/app/data/campaigns.json}
       HERMES_DB_PATH: ${HERMES_DB_PATH:-/app/data/hermes.db}
+      HERMES_BACKUP_DIR: ${HERMES_BACKUP_DIR:-/app/data/backups}
+      HERMES_SCRAPE_TIMEOUT: ${HERMES_SCRAPE_TIMEOUT:-2.0}
       # Empty by default. Profile postgres + DATABASE_URL=postgresql://hermes:hermes@postgres:5432/hermes
       # $0 extra on existing VPS 187.77.98.177 vs advertised intro ~$6.49/mo new KVM 1 (paid upfront).
       DATABASE_URL: ${DATABASE_URL:-}

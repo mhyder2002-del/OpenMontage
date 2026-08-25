@@ -83,6 +83,15 @@ def _source_status(name: str, topics: list[dict[str, Any]]) -> str:
     return "live" if name.lower() in blob else "idle"
 
 
+def ingest_scanned_opportunities(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    stored = []
+    for row in items:
+        stored.append(upsert_opportunity(row))
+    if stored:
+        append_debug_event("discovery_scan", {"count": len(stored), "paid": False})
+    return stored
+
+
 def discovery_payload(topics: list[dict[str, Any]]) -> dict[str, Any]:
     stored = list_opportunities()
     opportunities = stored
@@ -99,8 +108,9 @@ def discovery_payload(topics: list[dict[str, Any]]) -> dict[str, Any]:
             }
             for i, node in enumerate(topics[:12])
         ]
+    mix = list(topics) + list(opportunities)
     sources = [
-        {**src, "status": _source_status(str(src["name"]), topics)}
+        {**src, "status": _source_status(str(src["name"]), mix)}
         for src in DISCOVERY_SOURCES
     ]
     return {

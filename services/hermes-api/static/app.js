@@ -229,7 +229,10 @@
         <section class="card">
           <h2>AI opportunity scan</h2>
           <div class="chips" id="discovery-sources"></div>
-          <p class="muted" id="research-status">GET /api/discovery sources · chip a source to POST /api/agent/research.</p>
+          <p class="muted" id="research-status">GET /api/discovery sources · chip a source to POST /api/agent/research. Scan pulls unpaid YouTube Atom + Reddit JSON + News RSS (TikTok stand-in).</p>
+          <div class="actions" style="margin-top:0.7rem">
+            <button class="btn primary" type="button" id="discovery-scan">Scan live feeds</button>
+          </div>
           <div class="chips" id="discovery-topic-chips" style="margin-top:0.7rem"></div>
         </section>
         <div class="grid metrics" style="margin-top:0.75rem">
@@ -427,8 +430,9 @@
           <p class="muted" id="agent-feed">Loading /api/agents/publishing…</p>
         </section>
         <section class="card" style="margin-top:0.75rem">
-          <h2>Queue · 14 scheduled</h2>
-          ${["YouTube Short · Automation hook","TikTok · Claude vs coding","Reels · Everyday Carry 20s"].map((x)=>`<div class="row"><h3>${x}</h3><span class="pill">Queued</span></div>`).join("")}
+          <h2>Publish queue</h2>
+          <p class="muted">Live rows from GET /api/jobs (stage publish or kind publishing). No fake 14-item list.</p>
+          <div id="pub-queue"><p class="muted">Loading /api/jobs…</p></div>
         </section>`,
       uploads: `
         <section class="card">
@@ -476,7 +480,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
             <button class="btn" type="button" data-subscribe>Subscribe Autonomous v0.4.0</button>
           </div>
         </section>
-        <p class="muted" style="margin:1rem 0 0"><a href="#/outro">End card</a> · <a href="/docs">/docs</a> · <a href="/health">/health</a></p>`,
+        <p class="muted" style="margin:1rem 0 0"><a href="#/outro">End card</a> · <a href="/docs">/docs</a> · <a href="/health">/health</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/refunds">Refunds</a></p>`,
     };
   }
 
@@ -543,6 +547,7 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     if (page.id === "overview" || page.id === "discovery" || page.id === "knowledge") loadKnowledge();
     if (page.id === "overview") loadOverviewLive();
     if (page.id === "discovery") loadDiscovery();
+    if (page.id === "publishing") loadPublishingQueue();
     if (page.id === "knowledge") loadKnowledgeGraph();
     if (page.id === "orchestra") { loadOrchestra(); loadJobs(); }
     if (page.id === "evolution") loadEvolution();
@@ -1124,10 +1129,54 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
               const score = t.score != null ? t.score : (t.rank || i + 1);
               return `<div class="row"><div class="min-w"><h3>${String(t.rank || i + 1).toString().padStart(2, "0")} ${title}</h3><div class="stats">${meta}</div></div><span class="pill">${score}</span></div>`;
             }).join("")
-          : `<p class="empty">No opportunities yet. POST /api/product/bootstrap seeds the catalog.</p>`;
+          : `<p class="empty">No opportunities yet. Scan live feeds or POST /api/product/bootstrap.</p>`;
+      }
+      const scanBtn = document.getElementById("discovery-scan");
+      if (scanBtn && !scanBtn.dataset.bound) {
+        scanBtn.dataset.bound = "1";
+        scanBtn.addEventListener("click", async () => {
+          const status = document.getElementById("research-status");
+          if (status) status.textContent = "POST /api/discovery/scan…";
+          try {
+            const res = await apiFetch("/api/discovery/scan", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            });
+            const body = await res.json();
+            if (status) {
+              status.textContent = `${body.mode || res.status} · ${body.live_feeds || 0} feeds · ${body.stored || 0} stored · unpaid`;
+            }
+            loadDiscovery();
+          } catch (e) {
+            if (status) status.textContent = String(e);
+          }
+        });
       }
     } catch (err) {
       if (chips) chips.textContent = String(err);
+    }
+  }
+
+  async function loadPublishingQueue() {
+    const el = document.getElementById("pub-queue");
+    if (!el) return;
+    try {
+      const r = await fetch("/api/jobs");
+      const data = r.ok ? await r.json() : { jobs: [] };
+      const jobs = (data.jobs || []).filter((j) => {
+        const stage = String(j.stage || "").toLowerCase();
+        const kind = String(j.kind || "").toLowerCase();
+        return stage.includes("publish") || kind.includes("publish");
+      });
+      el.innerHTML = jobs.length
+        ? jobs.map((j) => {
+            const title = (j.detail && (j.detail.title || j.detail.topic)) || j.stage || j.kind;
+            return `<div class="row"><h3>${title}</h3><span class="pill">${j.status || "queued"}</span></div>`;
+          }).join("")
+        : `<p class="empty">No publish jobs yet. Launch a campaign; this list is GET /api/jobs, not a mock queue.</p>`;
+    } catch (err) {
+      el.innerHTML = `<p class="empty">${String(err)}</p>`;
     }
   }
 

@@ -38,6 +38,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("INFERENCE_BACKEND", "lm_studio")
     monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "campaigns.json"))
     monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "hermes.db"))
+    monkeypatch.setenv("HERMES_BACKUP_DIR", str(tmp_path / "backups"))
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("HERMES_RESEARCH_TIMEOUT", "0.4")
     monkeypatch.setenv("HERMES_FLYWHEEL_STORE", str(tmp_path / "flywheel.json"))
@@ -506,6 +507,7 @@ def test_console_pages_bind_every_category_agent():
     assert "research.py" in dockerfile
     assert "walking_skeleton.py" in dockerfile
     assert "product.py" in dockerfile
+    assert "scrapers.py" in dockerfile
     assert "/api/orchestra/pipeline" in os_js
     assert "/api/orchestra/pipeline" in app_js
     assert "/api/jobs" in os_js
@@ -821,6 +823,7 @@ def test_os_get_routes_stay_public_when_key_set(monkeypatch, tmp_path):
     monkeypatch.setenv("PUBLIC_DOMAIN", "hermestudios.com")
     monkeypatch.setenv("HERMES_API_KEY", "public-get-key")
     monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "public.db"))
+    monkeypatch.setenv("HERMES_BACKUP_DIR", str(tmp_path / "public-backups"))
     monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "public-campaigns.json"))
     monkeypatch.setenv("HERMES_FLYWHEEL_STORE", str(tmp_path / "public-fw.json"))
     monkeypatch.setenv("HERMES_AGENTS_STORE", str(tmp_path / "public-ag.json"))
@@ -837,6 +840,10 @@ def test_os_get_routes_stay_public_when_key_set(monkeypatch, tmp_path):
         "/api/jobs",
         "/api/orchestra/pipeline",
         "/api/memory",
+        "/api/ops/backup",
+        "/terms",
+        "/privacy",
+        "/refunds",
         "/health",
         "/api/status",
     ):
@@ -844,6 +851,8 @@ def test_os_get_routes_stay_public_when_key_set(monkeypatch, tmp_path):
         assert res.status_code == 200, path
     assert http.post("/api/evolution/missing/crown").status_code == 401
     assert http.post("/api/product/bootstrap").status_code == 401
+    assert http.post("/api/discovery/scan").status_code == 401
+    assert http.post("/api/ops/backup").status_code == 401
 
 
 def test_product_surfaces_jobs_orchestra_evolution_memory(client):
@@ -912,5 +921,56 @@ def test_product_surfaces_jobs_orchestra_evolution_memory(client):
     assert status["jobs"] == "/api/jobs"
     catalog = json.loads((APP_DIR / "endpoints.json").read_text(encoding="utf-8"))
     assert ("GET", "/api/jobs") in [(row["method"], row["path"]) for row in catalog]
+    assert ("POST", "/api/discovery/scan") in [(row["method"], row["path"]) for row in catalog]
+
+
+def test_discovery_scan_legal_and_sqlite_backup(client, monkeypatch):
+    http, module = client
+    landing = http.get("/")
+    assert landing.status_code == 200
+    assert b"/terms" in landing.content
+    for path, needle in (("/terms", b"Terms"), ("/privacy", b"Privacy"), ("/refunds", b"Refunds")):
+        page = http.get(path)
+        assert page.status_code == 200, path
+        assert needle in page.content
+    atom = b"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+      <entry><title>Local LLMs on a Mac</title><link href="https://youtube.com/watch?v=x"/><published>2026-08-25T00:00:00Z</published></entry>
+    </feed>"""
+    rss = b"""<?xml version="1.0"?><rss><channel>
+      <item><title>TikTok AI shorts exploding</title><link>https://news.example/t</link></item>
+    </channel></rss>"""
+    reddit = b"""{"data":{"children":[{"data":{"title":"Prompt engineering is dead","permalink":"/r/MachineLearning/1","ups":120}}]}}"""
+
+    def fake_fetch(url: str, timeout: float) -> bytes:
+        if "reddit.com" in url:
+            return reddit
+        if "news.google.com" in url:
+            return rss
+        return atom
+
+    monkeypatch.setattr(module, "scan_public_feeds", lambda query=None: __import__("scrapers").scan_public_feeds(fetch=fake_fetch, query=query))
+    scan = http.post("/api/discovery/scan", json={"query": "AI"})
+    assert scan.status_code == 200
+    body = scan.json()
+    assert body["paid"] is False
+    assert body["live_compose"] is False
+    assert body["stored"] >= 1
+    assert body["mode"] == "live"
+    disc = http.get("/api/discovery").json()
+    sources = {s["name"]: s["status"] for s in disc["sources"]}
+    assert sources["YouTube"] == "live"
+    assert sources["TikTok"] == "live"
+    assert sources["Reddit"] == "live"
+    titles = [o["title"] for o in disc["opportunities"]]
+    assert any("Local LLMs" in t for t in titles)
+    listed = http.get("/api/ops/backup")
+    assert listed.status_code == 200
+    created = http.post("/api/ops/backup")
+    assert created.status_code == 200
+    assert created.json()["ok"] is True
+    assert created.json()["backend"] == "sqlite"
+    assert created.json()["backups"]
+    assert http.get("/api/status").json()["discovery_scan"] == "/api/discovery/scan"
+
 
 
