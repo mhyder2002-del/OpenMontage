@@ -40,6 +40,7 @@ from campaigns import (
     get_campaign,
     list_campaigns,
     run_orchestra,
+    set_campaign_crowned,
     upsert_campaign,
 )
 from flywheel import (
@@ -53,8 +54,20 @@ from flywheel import (
 from agents.orchestrator import snapshot as agents_snapshot
 from agents.orchestrator import snapshot_category as agents_snapshot_category
 from agents.orchestrator import tick_all as agents_tick_all
-from db import list_knowledge_nodes
-from research import run_research
+from db import get_job, knowledge_graph, list_debug_events, list_knowledge_nodes
+from research import recency_score, run_research, wikipedia_summary
+from moneyprinter import status_snapshot as moneyprinter_status
+from product import (
+    archive_variant,
+    bootstrap_catalog,
+    compounding_analytics,
+    discovery_payload,
+    evolution_lab,
+    jobs_payload,
+    memory_payload,
+    promote_variant,
+    workforce_snapshot,
+)
 from walking_skeleton import (
     GenerateScriptRequest,
     GenerateStoryboardRequest,
@@ -417,9 +430,12 @@ def health() -> dict[str, Any]:
             "max_inflight": _max_inflight(),
         },
         "lm_studio": {
+            "status": "up" if lm["reachable"] else "down",
             "reachable": lm["reachable"],
             "models": lm["models"],
+            "backend": lm["backend"],
         },
+        "moneyprinter": moneyprinter_status(probe=True),
         "flywheel": {
             "running": fw.get("running"),
             "cycle_count": fw.get("cycle_count"),
@@ -528,6 +544,8 @@ async def youtube_upload_stub(
 
 @app.get("/api/status")
 def api_status() -> dict[str, Any]:
+    lm = _lm_health()
+    reachable = bool(lm.get("reachable"))
     return {
         "domain": _public_domain(),
         "health": "/health",
@@ -543,8 +561,22 @@ def api_status() -> dict[str, Any]:
         "agents": "/api/agents",
         "research": "/api/agent/research",
         "knowledge": "/api/knowledge/nodes",
+        "knowledge_graph": "/api/knowledge/graph",
+        "discovery": "/api/discovery",
+        "analytics": "/api/analytics",
+        "evolution": "/api/evolution",
+        "debugger": "/api/debugger",
+        "jobs": "/api/jobs",
+        "orchestra_pipeline": "/api/orchestra/pipeline",
+        "memory": "/api/memory",
         "stripe_configured": stripe_configured(),
         "origin": public_origin(),
+        "lm_studio": {
+            "status": "up" if reachable else "down",
+            "reachable": reachable,
+            "backend": lm.get("backend"),
+        },
+        "moneyprinter": moneyprinter_status(probe=True),
     }
 
 
@@ -694,23 +726,140 @@ def api_knowledge_nodes() -> dict[str, Any]:
     return {"nodes": nodes, "count": len(nodes)}
 
 
+@app.get("/api/knowledge/graph")
+def api_knowledge_graph() -> dict[str, Any]:
+    try:
+        graph = knowledge_graph()
+    except Exception:
+        graph = {"nodes": [], "links": [], "count": 0}
+    return graph
+
+
+def _wiki_wanted(request: Request) -> bool:
+    flag = (os.environ.get("HERMES_DISCOVERY_WIKI") or "").strip().lower() in {"1", "true", "yes", "on"}
+    q = (request.query_params.get("wiki") or "").strip().lower()
+    return flag or q in {"1", "true", "yes", "on"}
+
+
 @app.get("/api/discovery")
-def api_discovery() -> dict[str, Any]:
+def api_discovery(request: Request) -> dict[str, Any]:
     try:
         nodes = list_knowledge_nodes()
     except Exception:
         nodes = []
+    want_wiki = _wiki_wanted(request)
+    topics: list[dict[str, Any]] = []
+    for index, node in enumerate(nodes):
+        topic = {
+            "name": node.get("topic"),
+            "id": node.get("id"),
+            "trend": node.get("trend"),
+            "updated_at": node.get("updated_at"),
+            "mode": node.get("mode"),
+            "label": node.get("label"),
+            "recency_score": recency_score(str(node.get("updated_at") or "")),
+            "source": node.get("source"),
+        }
+        if want_wiki and index < 5:
+            summary = wikipedia_summary(str(node.get("topic") or ""), timeout=0.6)
+            if summary:
+                topic["wikipedia"] = summary
+        topics.append(topic)
+    extra = discovery_payload(topics)
+    return {"topics": topics, "count": len(topics), **extra}
+
+
+@app.get("/api/analytics")
+def api_analytics() -> dict[str, Any]:
+    fw = _flywheel_public()
+    try:
+        nodes = list_knowledge_nodes()
+    except Exception:
+        nodes = []
+    campaigns = list_campaigns()
+    by_label: dict[str, int] = {}
+    for item in campaigns:
+        key = str(item.get("label") or "pending")
+        by_label[key] = by_label.get(key, 0) + 1
+    live_nodes = sum(1 for n in nodes if n.get("mode") == "live")
+    dry_nodes = sum(1 for n in nodes if n.get("mode") == "dry_run")
     return {
-        "topics": [
-            {
-                "name": n.get("topic"),
-                "trend": n.get("trend"),
-                "updated_at": n.get("updated_at"),
-            }
-            for n in nodes
-        ],
-        "count": len(nodes),
+        "tick_total": int(fw.get("tick_total") or 0),
+        "campaigns_by_label": by_label,
+        "campaign_count": len(campaigns),
+        "knowledge_count": len(nodes),
+        "research": {"live": live_nodes, "dry_run": dry_nodes},
+        "flywheel_label": fw.get("label"),
+        "pipeline": "hermes-flywheel",
+        "compounding": compounding_analytics(),
+        "campaigns": by_label,
     }
+
+
+@app.get("/api/evolution")
+def api_evolution() -> dict[str, Any]:
+    campaigns = list_campaigns()
+    rows = []
+    for item in campaigns:
+        rows.append(
+            {
+                "id": item.get("id"),
+                "niche": item.get("niche"),
+                "status": item.get("status"),
+                "label": item.get("label"),
+                "healed": bool(item.get("healed")),
+                "crowned": bool(item.get("crowned")),
+                "updated_at": item.get("updated_at"),
+            }
+        )
+    return {
+        "campaigns": rows,
+        "crowned": [row for row in rows if row.get("crowned")],
+        "completed": sum(1 for row in rows if row.get("status") == "completed"),
+        "completed_healed": sum(1 for row in rows if row.get("status") == "completed_healed"),
+        "count": len(rows),
+        **evolution_lab(),
+    }
+
+
+@app.post("/api/evolution/{campaign_id}/crown")
+def api_evolution_crown(
+    campaign_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    campaign = set_campaign_crowned(campaign_id, crowned=True)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign
+
+
+@app.post("/api/evolution/{campaign_id}/retire")
+def api_evolution_retire(
+    campaign_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    campaign = set_campaign_crowned(campaign_id, crowned=False, retire=True)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign
+
+
+@app.get("/api/debugger")
+def api_debugger() -> dict[str, Any]:
+    fw = _flywheel_public()
+    ticks = fw.get("ticks") if isinstance(fw.get("ticks"), list) else []
+    merged: list[dict[str, Any]] = []
+    try:
+        merged.extend(list_debug_events(50))
+    except Exception:
+        pass
+    for tick in reversed(ticks[-20:]):
+        if isinstance(tick, dict):
+            merged.append({"kind": "flywheel_tick", "ts": tick.get("ts"), "detail": tick})
+    merged.sort(key=lambda row: float(row.get("ts") or 0), reverse=True)
+    return {"events": merged[:50], "count": len(merged[:50])}
 
 
 @app.post("/api/campaigns")
@@ -896,6 +1045,59 @@ def api_campaign_events(campaign_id: str) -> dict[str, Any]:
         "cuts": campaign.get("cuts") or [],
         "events": campaign.get("events") or [],
     }
+
+
+@app.get("/api/jobs")
+def api_jobs(campaign_id: str | None = None) -> dict[str, Any]:
+    return jobs_payload(campaign_id)
+
+
+@app.get("/api/jobs/{job_id}")
+def api_job(job_id: str) -> dict[str, Any]:
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/api/orchestra/pipeline")
+def api_orchestra_pipeline(campaign_id: str | None = None) -> dict[str, Any]:
+    return workforce_snapshot(campaign_id)
+
+
+@app.get("/api/memory")
+def api_memory() -> dict[str, Any]:
+    return memory_payload()
+
+
+@app.post("/api/product/bootstrap")
+def api_product_bootstrap(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    return bootstrap_catalog()
+
+
+@app.post("/api/evolution/variants/{variant_id}/promote")
+def api_promote_variant(
+    variant_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    row = promote_variant(variant_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Variant not found")
+    return row
+
+
+@app.post("/api/evolution/variants/{variant_id}/archive")
+def api_archive_variant(
+    variant_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_mutating_api_auth(authorization)
+    row = archive_variant(variant_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Variant not found")
+    return row
 
 
 if __name__ == "__main__":

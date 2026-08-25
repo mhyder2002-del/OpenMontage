@@ -15,6 +15,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/os.css" />
   </head>
   <body>
     <a class="skip" href="#main">Skip to workspace</a>
@@ -52,7 +53,12 @@
       </div>
     </section>
 
-    <div class="app" id="app">
+    <div class="app os-shell" id="app">
+      <div class="os-chrome" aria-hidden="true">
+        <span class="os-dots"><i></i><i></i><i></i></span>
+        <span class="os-chrome-title">Hermes OS</span>
+        <span class="os-chrome-meta" id="os-chrome-meta">live JSON</span>
+      </div>
       <div class="mobile-nav">
         <strong>Hermes OS</strong>
         <button type="button" class="btn" id="menu-toggle" aria-expanded="false">Menu</button>
@@ -104,6 +110,17 @@
         </header>
         <main id="main" tabindex="-1"></main>
       </div>
+      <nav class="os-dock" aria-label="OS dock">
+        <a href="#/overview" data-dock="overview">Overview</a>
+        <a href="#/discovery" data-dock="discovery">Discovery</a>
+        <a href="#/knowledge" data-dock="knowledge">Graph</a>
+        <a href="#/campaigns" data-dock="campaigns">Campaigns</a>
+        <a href="#/orchestra" data-dock="orchestra">Orchestra</a>
+        <a href="#/debugger" data-dock="debugger">Debugger</a>
+        <a href="#/studio" data-dock="studio">Studio</a>
+        <a href="#/evolution" data-dock="evolution">Evolution</a>
+        <a href="#/analytics" data-dock="analytics">Analytics</a>
+      </nav>
     </div>
 
     <div class="palette" id="palette" role="dialog" aria-modal="true" aria-labelledby="cmd-label">
@@ -114,6 +131,7 @@
       </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="/static/app.js?v=os24"></script>
   </body>
 </html>

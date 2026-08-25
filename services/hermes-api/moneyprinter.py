@@ -117,10 +117,10 @@ def _request(
         raise RuntimeError(str(exc)) from exc
 
 
-def probe_http() -> dict[str, Any]:
+def probe_http(*, timeout: float | None = None) -> dict[str, Any]:
     url = f"{base_url()}{DEFAULT_TASK_PATH}?page=1&page_size=1"
     try:
-        code, body = _request("GET", url)
+        code, body = _request("GET", url, timeout=timeout)
     except RuntimeError as exc:
         return {"ok": False, "error": str(exc)[:300], "url": url}
     ok = code == 200
@@ -156,6 +156,30 @@ def available() -> dict[str, Any]:
     if mode() == "cli":
         return {**probe_cli(), "mode": "cli"}
     return {**probe_http(), "mode": "http"}
+
+
+def status_snapshot(*, probe: bool = True) -> dict[str, Any]:
+    """Cheap MPT chip for /health — no probe unless MONEYPRINTER_ENABLED."""
+    flag = enabled()
+    payload: dict[str, Any] = {
+        "enabled": flag,
+        "mode": mode(),
+        "base_url": base_url(),
+        "reachable": False,
+        "label": "DRY-RUN",
+    }
+    if not flag:
+        payload["note"] = "MONEYPRINTER_ENABLED unset; :8088 DRY-RUN if down."
+        return payload
+    if not probe:
+        payload["label"] = "live"
+        return payload
+    probe_result = probe_cli() if mode() == "cli" else probe_http(timeout=0.4)
+    reachable = bool(probe_result.get("ok"))
+    payload["reachable"] = reachable
+    payload["label"] = "live" if reachable else "DRY-RUN"
+    payload["probe"] = {k: probe_result[k] for k in probe_result if k != "body"}
+    return payload
 
 
 def _create_payload(topic: str, extras: dict[str, Any] | None = None) -> dict[str, Any]:

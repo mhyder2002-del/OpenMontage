@@ -270,6 +270,12 @@ async def run_one_tick(
         ticks.append(tick)
         state["ticks"] = ticks[-200:]
         save_state(state)
+        try:
+            from db import append_debug_event
+
+            append_debug_event("flywheel_tick", tick)
+        except Exception:
+            pass
         return {"skipped": False, "tick": tick, "agents": agent_tick, **snapshot()}
     state = load_state()
     state["active_campaign_id"] = campaign["id"]
@@ -310,6 +316,12 @@ async def run_one_tick(
     ticks.append(tick)
     state["ticks"] = ticks[-200:]
     save_state(state)
+    try:
+        from db import append_debug_event
+
+        append_debug_event("flywheel_tick", tick)
+    except Exception:
+        pass
     return {"skipped": False, "tick": tick, "agents": agent_tick, **snapshot()}
 
 

@@ -6,6 +6,8 @@ import json
 import os
 import sqlite3
 import threading
+import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -122,7 +124,112 @@ def _schema_sql() -> tuple[str, ...]:
             created_at TEXT NOT NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_edges (
+            src TEXT NOT NULL,
+            dst TEXT NOT NULL,
+            rel TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (src, dst, rel)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS debug_events (
+            id TEXT PRIMARY KEY,
+            ts REAL NOT NULL,
+            kind TEXT NOT NULL,
+            detail TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS kv_store (
+            k TEXT PRIMARY KEY,
+            v TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            campaign_id TEXT,
+            stage TEXT,
+            status TEXT NOT NULL,
+            progress REAL NOT NULL,
+            detail TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS opportunities (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            score INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            payload TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS experiments (
+            id TEXT PRIMARY KEY,
+            number INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            campaign_id TEXT,
+            payload TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS experiment_variants (
+            id TEXT PRIMARY KEY,
+            experiment_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            category TEXT NOT NULL,
+            score INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS metric_points (
+            id TEXT PRIMARY KEY,
+            metric TEXT NOT NULL,
+            value REAL NOT NULL,
+            run_index INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS learnings (
+            id TEXT PRIMARY KEY,
+            insight TEXT NOT NULL,
+            lift REAL NOT NULL,
+            category TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS pipeline_agents (
+            id TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL,
+            agent_key TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT NOT NULL,
+            progress REAL NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (campaign_id, agent_key)
+        )
+        """,
     )
+
+
+def _ensure_column(db: Any, table: str, column: str, decl: str) -> None:
+    try:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    except Exception:
+        pass
 
 
 def init_schema(conn: Any | None = None) -> None:
@@ -131,6 +238,8 @@ def init_schema(conn: Any | None = None) -> None:
     try:
         for stmt in _schema_sql():
             db.execute(stmt)
+        _ensure_column(db, "knowledge_nodes", "mode", "TEXT")
+        _ensure_column(db, "knowledge_nodes", "label", "TEXT")
         if hasattr(db, "commit"):
             db.commit()
     finally:
@@ -252,11 +361,27 @@ def list_campaign_rows() -> list[dict[str, Any]]:
     return items
 
 
-def upsert_knowledge_node(topic: str, trend: str, *, source: str = "research") -> dict[str, Any]:
+def _mode_label(mode: str | None, label: str | None, trend: str) -> tuple[str, str]:
+    if (trend or "").startswith("[DRY-RUN]"):
+        inferred_mode, inferred_label = "dry_run", "DRY-RUN"
+    else:
+        inferred_mode, inferred_label = "live", "live"
+    return (mode or inferred_mode), (label or inferred_label)
+
+
+def upsert_knowledge_node(
+    topic: str,
+    trend: str,
+    *,
+    source: str = "research",
+    mode: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any]:
     ensure_db()
     now = _now_iso()
     slug = (topic or "topic").strip() or "topic"
     node_id = slug.lower()[:80]
+    mode, label = _mode_label(mode, label, trend)
     db = connect()
     try:
         existing = db.execute(
@@ -266,8 +391,12 @@ def upsert_knowledge_node(topic: str, trend: str, *, source: str = "research") -
         if existing:
             created = existing[1] if not hasattr(existing, "keys") else existing["created_at"]
             db.execute(
-                "UPDATE knowledge_nodes SET trend = ?, source = ?, updated_at = ? WHERE topic = ?",
-                (trend, source, now, slug),
+                """
+                UPDATE knowledge_nodes
+                SET trend = ?, source = ?, updated_at = ?, mode = ?, label = ?
+                WHERE topic = ?
+                """,
+                (trend, source, now, mode, label, slug),
             )
             nid = existing[0] if not hasattr(existing, "keys") else existing["id"]
         else:
@@ -275,10 +404,11 @@ def upsert_knowledge_node(topic: str, trend: str, *, source: str = "research") -
             nid = node_id
             db.execute(
                 """
-                INSERT INTO knowledge_nodes (id, topic, trend, source, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO knowledge_nodes
+                    (id, topic, trend, source, created_at, updated_at, mode, label)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (nid, slug, trend, source, created, now),
+                (nid, slug, trend, source, created, now, mode, label),
             )
         db.commit()
     finally:
@@ -288,35 +418,260 @@ def upsert_knowledge_node(topic: str, trend: str, *, source: str = "research") -
         "topic": slug,
         "trend": trend,
         "source": source,
+        "mode": mode,
+        "label": label,
         "created_at": created,
         "updated_at": now,
     }
+
+
+def _node_from_row(row: Any) -> dict[str, Any]:
+    if hasattr(row, "keys"):
+        item = {k: row[k] for k in row.keys()}
+    else:
+        item = {
+            "id": row[0],
+            "topic": row[1],
+            "trend": row[2],
+            "source": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+        }
+        if len(row) > 6:
+            item["mode"] = row[6]
+            item["label"] = row[7]
+    trend = str(item.get("trend") or "")
+    mode, label = _mode_label(item.get("mode"), item.get("label"), trend)
+    item["mode"] = mode
+    item["label"] = label
+    return item
 
 
 def list_knowledge_nodes() -> list[dict[str, Any]]:
     ensure_db()
     db = connect()
     try:
+        try:
+            rows = db.execute(
+                """
+                SELECT id, topic, trend, source, created_at, updated_at, mode, label
+                FROM knowledge_nodes ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        except Exception:
+            rows = db.execute(
+                "SELECT id, topic, trend, source, created_at, updated_at FROM knowledge_nodes ORDER BY updated_at DESC"
+            ).fetchall()
+    finally:
+        db.close()
+    return [_node_from_row(row) for row in rows]
+
+
+def get_knowledge_node(topic: str) -> dict[str, Any] | None:
+    ensure_db()
+    slug = (topic or "").strip()
+    if not slug:
+        return None
+    db = connect()
+    try:
+        row = db.execute(
+            """
+            SELECT id, topic, trend, source, created_at, updated_at, mode, label
+            FROM knowledge_nodes WHERE topic = ? OR id = ?
+            """,
+            (slug, slug.lower()[:80]),
+        ).fetchone()
+    finally:
+        db.close()
+    return _node_from_row(row) if row is not None else None
+
+
+def upsert_knowledge_edge(src: str, dst: str, rel: str = "researched_with") -> dict[str, Any] | None:
+    ensure_db()
+    a = (src or "").strip()
+    b = (dst or "").strip()
+    kind = (rel or "researched_with").strip() or "researched_with"
+    if not a or not b or a == b:
+        return None
+    if a > b and kind == "researched_with":
+        a, b = b, a
+    now = _now_iso()
+    db = connect()
+    try:
+        try:
+            db.execute(
+                """
+                INSERT INTO knowledge_edges (src, dst, rel, created_at) VALUES (?, ?, ?, ?)
+                ON CONFLICT(src, dst, rel) DO UPDATE SET created_at = excluded.created_at
+                """,
+                (a, b, kind, now),
+            )
+        except Exception:
+            db.execute(
+                "DELETE FROM knowledge_edges WHERE src = ? AND dst = ? AND rel = ?",
+                (a, b, kind),
+            )
+            db.execute(
+                "INSERT INTO knowledge_edges (src, dst, rel, created_at) VALUES (?, ?, ?, ?)",
+                (a, b, kind, now),
+            )
+        db.commit()
+    finally:
+        db.close()
+    return {"source": a, "target": b, "rel": kind, "created_at": now}
+
+
+def list_knowledge_edges() -> list[dict[str, Any]]:
+    ensure_db()
+    db = connect()
+    try:
         rows = db.execute(
-            "SELECT id, topic, trend, source, created_at, updated_at FROM knowledge_nodes ORDER BY updated_at DESC"
+            "SELECT src, dst, rel, created_at FROM knowledge_edges ORDER BY created_at DESC"
+        ).fetchall()
+    finally:
+        db.close()
+    links: list[dict[str, Any]] = []
+    for row in rows:
+        if hasattr(row, "keys"):
+            links.append(
+                {
+                    "source": row["src"],
+                    "target": row["dst"],
+                    "rel": row["rel"],
+                    "created_at": row["created_at"],
+                }
+            )
+        else:
+            links.append({"source": row[0], "target": row[1], "rel": row[2], "created_at": row[3]})
+    return links
+
+
+def knowledge_graph() -> dict[str, Any]:
+    nodes = list_knowledge_nodes()
+    links = list_knowledge_edges()
+    ids = {str(n.get("id")) for n in nodes}
+    topics = {str(n.get("topic")) for n in nodes}
+    aliases = ids | topics | {value.lower() for value in ids | topics}
+    filtered = [
+        link
+        for link in links
+        if str(link["source"]) in aliases and str(link["target"]) in aliases
+    ]
+    return {"nodes": nodes, "links": filtered, "count": len(nodes)}
+
+
+def kv_get(key: str) -> str | None:
+    ensure_db()
+    db = connect()
+    try:
+        row = db.execute("SELECT v FROM kv_store WHERE k = ?", (key,)).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    return row[0] if not hasattr(row, "keys") else row["v"]
+
+
+def kv_set(key: str, value: str) -> None:
+    ensure_db()
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO kv_store (k, v) VALUES (?, ?)
+            ON CONFLICT(k) DO UPDATE SET v = excluded.v
+            """,
+            (key, value),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def link_research_session(node_id: str) -> dict[str, Any] | None:
+    last = kv_get("last_research_node_id")
+    edge = None
+    if last:
+        edge = upsert_knowledge_edge(last, node_id, "researched_with")
+    kv_set("last_research_node_id", node_id)
+    return edge
+
+
+def link_campaign_niche(niche: str) -> dict[str, Any] | None:
+    slug = (niche or "").strip()
+    if not slug:
+        return None
+    node = get_knowledge_node(slug)
+    if node is None:
+        node = upsert_knowledge_node(
+            slug,
+            f"Campaign niche: {slug}",
+            source="campaign",
+            mode="pending",
+            label="pending",
+        )
+    last = kv_get("last_research_node_id")
+    nid = str(node.get("id") or "")
+    if last and last != nid:
+        return upsert_knowledge_edge(last, nid, "campaign")
+    return None
+
+
+DEBUG_RING = 80
+
+
+def append_debug_event(kind: str, detail: str | dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    payload = json.dumps(detail) if isinstance(detail, dict) else str(detail)
+    event = {
+        "id": str(uuid.uuid4()),
+        "ts": time.time(),
+        "kind": str(kind or "event"),
+        "detail": payload,
+    }
+    db = connect()
+    try:
+        db.execute(
+            "INSERT INTO debug_events (id, ts, kind, detail) VALUES (?, ?, ?, ?)",
+            (event["id"], event["ts"], event["kind"], event["detail"]),
+        )
+        extra = db.execute(
+            "SELECT id FROM debug_events ORDER BY ts DESC"
+        ).fetchall()
+        if extra and len(extra) > DEBUG_RING:
+            for row in extra[DEBUG_RING:]:
+                rid = row[0] if not hasattr(row, "keys") else row["id"]
+                db.execute("DELETE FROM debug_events WHERE id = ?", (rid,))
+        db.commit()
+    finally:
+        db.close()
+    return event
+
+
+def list_debug_events(limit: int = 50) -> list[dict[str, Any]]:
+    ensure_db()
+    cap = max(1, min(int(limit or 50), DEBUG_RING))
+    db = connect()
+    try:
+        rows = db.execute(
+            "SELECT id, ts, kind, detail FROM debug_events ORDER BY ts DESC LIMIT ?",
+            (cap,),
         ).fetchall()
     finally:
         db.close()
     out: list[dict[str, Any]] = []
     for row in rows:
         if hasattr(row, "keys"):
-            out.append({k: row[k] for k in row.keys()})
+            item = {k: row[k] for k in row.keys()}
         else:
-            out.append(
-                {
-                    "id": row[0],
-                    "topic": row[1],
-                    "trend": row[2],
-                    "source": row[3],
-                    "created_at": row[4],
-                    "updated_at": row[5],
-                }
-            )
+            item = {"id": row[0], "ts": row[1], "kind": row[2], "detail": row[3]}
+        raw = item.get("detail")
+        if isinstance(raw, str) and raw.startswith("{"):
+            try:
+                item["detail"] = json.loads(raw)
+            except json.JSONDecodeError:
+                pass
+        out.append(item)
     return out
 
 
@@ -485,6 +840,485 @@ def get_walking_thumbnail(thumbnail_id: str) -> dict[str, Any] | None:
         "thumbnail_url": row[3],
         "created_at": row[4],
     }
+
+
+def _as_dict(row: Any, keys: tuple[str, ...]) -> dict[str, Any]:
+    if hasattr(row, "keys"):
+        return {k: row[k] for k in row.keys()}
+    return {keys[i]: row[i] for i in range(len(keys))}
+
+
+def upsert_job(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    now = _now_iso()
+    item = {
+        "id": str(row.get("id") or uuid.uuid4()),
+        "kind": str(row.get("kind") or "stage"),
+        "campaign_id": row.get("campaign_id"),
+        "stage": row.get("stage"),
+        "status": str(row.get("status") or "queued"),
+        "progress": float(row.get("progress") or 0),
+        "detail": json.dumps(row.get("detail") if isinstance(row.get("detail"), (dict, list)) else (row.get("detail") or {})),
+        "created_at": str(row.get("created_at") or now),
+        "updated_at": now,
+    }
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO jobs (id, kind, campaign_id, stage, status, progress, detail, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                kind = excluded.kind,
+                campaign_id = excluded.campaign_id,
+                stage = excluded.stage,
+                status = excluded.status,
+                progress = excluded.progress,
+                detail = excluded.detail,
+                updated_at = excluded.updated_at
+            """,
+            (
+                item["id"],
+                item["kind"],
+                item["campaign_id"],
+                item["stage"],
+                item["status"],
+                item["progress"],
+                item["detail"],
+                item["created_at"],
+                item["updated_at"],
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return decode_job(item)
+
+
+def decode_job(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("detail")
+    if isinstance(raw, str):
+        try:
+            item["detail"] = json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+    return item
+
+
+def list_jobs(*, campaign_id: str | None = None, limit: int = 80) -> list[dict[str, Any]]:
+    ensure_db()
+    cap = max(1, min(int(limit or 80), 200))
+    db = connect()
+    try:
+        if campaign_id:
+            rows = db.execute(
+                """
+                SELECT id, kind, campaign_id, stage, status, progress, detail, created_at, updated_at
+                FROM jobs WHERE campaign_id = ? ORDER BY updated_at DESC LIMIT ?
+                """,
+                (campaign_id, cap),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT id, kind, campaign_id, stage, status, progress, detail, created_at, updated_at
+                FROM jobs ORDER BY updated_at DESC LIMIT ?
+                """,
+                (cap,),
+            ).fetchall()
+    finally:
+        db.close()
+    keys = ("id", "kind", "campaign_id", "stage", "status", "progress", "detail", "created_at", "updated_at")
+    return [decode_job(_as_dict(row, keys)) for row in rows]
+
+
+def get_job(job_id: str) -> dict[str, Any] | None:
+    ensure_db()
+    db = connect()
+    try:
+        row = db.execute(
+            """
+            SELECT id, kind, campaign_id, stage, status, progress, detail, created_at, updated_at
+            FROM jobs WHERE id = ?
+            """,
+            (str(job_id),),
+        ).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    keys = ("id", "kind", "campaign_id", "stage", "status", "progress", "detail", "created_at", "updated_at")
+    return decode_job(_as_dict(row, keys))
+
+
+def upsert_opportunity(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    now = _now_iso()
+    extra = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    item = {
+        "id": str(row.get("id") or uuid.uuid4()),
+        "title": str(row.get("title") or "Untitled"),
+        "score": int(row.get("score") or 0),
+        "source": str(row.get("source") or "Trends"),
+        "rank": int(row.get("rank") or 0),
+        "payload": json.dumps(extra),
+        "updated_at": now,
+    }
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO opportunities (id, title, score, source, rank, payload, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                score = excluded.score,
+                source = excluded.source,
+                rank = excluded.rank,
+                payload = excluded.payload,
+                updated_at = excluded.updated_at
+            """,
+            (item["id"], item["title"], item["score"], item["source"], item["rank"], item["payload"], item["updated_at"]),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return list_opportunities_decoded([item])[0]
+
+
+def list_opportunities_decoded(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for item in items:
+        raw = item.get("payload")
+        payload = {}
+        if isinstance(raw, str):
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+        elif isinstance(raw, dict):
+            payload = raw
+        out.append({**item, "payload": payload})
+    return out
+
+
+def list_opportunities() -> list[dict[str, Any]]:
+    ensure_db()
+    db = connect()
+    try:
+        rows = db.execute(
+            "SELECT id, title, score, source, rank, payload, updated_at FROM opportunities ORDER BY score DESC, rank ASC"
+        ).fetchall()
+    finally:
+        db.close()
+    keys = ("id", "title", "score", "source", "rank", "payload", "updated_at")
+    return list_opportunities_decoded([_as_dict(row, keys) for row in rows])
+
+
+def upsert_experiment(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    now = _now_iso()
+    extra = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    item = {
+        "id": str(row.get("id") or uuid.uuid4()),
+        "number": int(row.get("number") or 1),
+        "title": str(row.get("title") or "Experiment"),
+        "campaign_id": row.get("campaign_id"),
+        "payload": json.dumps(extra),
+        "updated_at": now,
+    }
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO experiments (id, number, title, campaign_id, payload, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                number = excluded.number,
+                title = excluded.title,
+                campaign_id = excluded.campaign_id,
+                payload = excluded.payload,
+                updated_at = excluded.updated_at
+            """,
+            (item["id"], item["number"], item["title"], item["campaign_id"], item["payload"], item["updated_at"]),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return item
+
+
+def upsert_experiment_variant(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    now = _now_iso()
+    item = {
+        "id": str(row.get("id") or uuid.uuid4()),
+        "experiment_id": str(row.get("experiment_id") or ""),
+        "label": str(row.get("label") or ""),
+        "category": str(row.get("category") or "variant"),
+        "score": int(row.get("score") or 0),
+        "state": str(row.get("state") or "testing"),
+        "updated_at": now,
+    }
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO experiment_variants (id, experiment_id, label, category, score, state, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                label = excluded.label,
+                category = excluded.category,
+                score = excluded.score,
+                state = excluded.state,
+                updated_at = excluded.updated_at
+            """,
+            (
+                item["id"],
+                item["experiment_id"],
+                item["label"],
+                item["category"],
+                item["score"],
+                item["state"],
+                item["updated_at"],
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return item
+
+
+def get_experiment(experiment_id: str) -> dict[str, Any] | None:
+    ensure_db()
+    db = connect()
+    try:
+        row = db.execute(
+            "SELECT id, number, title, campaign_id, payload, updated_at FROM experiments WHERE id = ?",
+            (str(experiment_id),),
+        ).fetchone()
+        variants = db.execute(
+            """
+            SELECT id, experiment_id, label, category, score, state, updated_at
+            FROM experiment_variants WHERE experiment_id = ? ORDER BY score DESC
+            """,
+            (str(experiment_id),),
+        ).fetchall()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    exp_keys = ("id", "number", "title", "campaign_id", "payload", "updated_at")
+    var_keys = ("id", "experiment_id", "label", "category", "score", "state", "updated_at")
+    item = _as_dict(row, exp_keys)
+    raw = item.get("payload")
+    if isinstance(raw, str):
+        try:
+            item["payload"] = json.loads(raw)
+        except json.JSONDecodeError:
+            item["payload"] = {}
+    item["variants"] = [_as_dict(v, var_keys) for v in variants]
+    return item
+
+
+def list_experiments() -> list[dict[str, Any]]:
+    ensure_db()
+    db = connect()
+    try:
+        rows = db.execute(
+            "SELECT id FROM experiments ORDER BY number DESC, updated_at DESC"
+        ).fetchall()
+    finally:
+        db.close()
+    out = []
+    for row in rows:
+        eid = row[0] if not hasattr(row, "keys") else row["id"]
+        item = get_experiment(str(eid))
+        if item:
+            out.append(item)
+    return out
+
+
+def set_variant_state(variant_id: str, state: str) -> dict[str, Any] | None:
+    ensure_db()
+    now = _now_iso()
+    db = connect()
+    try:
+        db.execute(
+            "UPDATE experiment_variants SET state = ?, updated_at = ? WHERE id = ?",
+            (state, now, str(variant_id)),
+        )
+        db.commit()
+        row = db.execute(
+            """
+            SELECT id, experiment_id, label, category, score, state, updated_at
+            FROM experiment_variants WHERE id = ?
+            """,
+            (str(variant_id),),
+        ).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    return _as_dict(row, ("id", "experiment_id", "label", "category", "score", "state", "updated_at"))
+
+
+def append_metric_point(metric: str, value: float, run_index: int | None = None) -> dict[str, Any]:
+    ensure_db()
+    now = _now_iso()
+    db = connect()
+    try:
+        if run_index is None:
+            row = db.execute(
+                "SELECT MAX(run_index) FROM metric_points WHERE metric = ?",
+                (metric,),
+            ).fetchone()
+            last = row[0] if row is not None else None
+            run_index = int(last or 0) + 1
+        item = {
+            "id": str(uuid.uuid4()),
+            "metric": metric,
+            "value": float(value),
+            "run_index": int(run_index),
+            "created_at": now,
+        }
+        db.execute(
+            "INSERT INTO metric_points (id, metric, value, run_index, created_at) VALUES (?, ?, ?, ?, ?)",
+            (item["id"], item["metric"], item["value"], item["run_index"], item["created_at"]),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return item
+
+
+def list_metric_series(metric: str | None = None, limit: int = 24) -> list[dict[str, Any]]:
+    ensure_db()
+    cap = max(1, min(int(limit or 24), 100))
+    db = connect()
+    try:
+        if metric:
+            rows = db.execute(
+                """
+                SELECT id, metric, value, run_index, created_at
+                FROM metric_points WHERE metric = ? ORDER BY run_index ASC LIMIT ?
+                """,
+                (metric, cap),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT id, metric, value, run_index, created_at
+                FROM metric_points ORDER BY metric, run_index ASC
+                """
+            ).fetchall()
+    finally:
+        db.close()
+    keys = ("id", "metric", "value", "run_index", "created_at")
+    return [_as_dict(row, keys) for row in rows]
+
+
+def upsert_learning(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    now = _now_iso()
+    item = {
+        "id": str(row.get("id") or uuid.uuid4()),
+        "insight": str(row.get("insight") or ""),
+        "lift": float(row.get("lift") or 0),
+        "category": str(row.get("category") or "memory"),
+        "created_at": str(row.get("created_at") or now),
+    }
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO learnings (id, insight, lift, category, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET insight = excluded.insight, lift = excluded.lift, category = excluded.category
+            """,
+            (item["id"], item["insight"], item["lift"], item["category"], item["created_at"]),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return item
+
+
+def list_learnings() -> list[dict[str, Any]]:
+    ensure_db()
+    db = connect()
+    try:
+        rows = db.execute(
+            "SELECT id, insight, lift, category, created_at FROM learnings ORDER BY lift DESC"
+        ).fetchall()
+    finally:
+        db.close()
+    return [_as_dict(row, ("id", "insight", "lift", "category", "created_at")) for row in rows]
+
+
+def upsert_pipeline_agent(row: dict[str, Any]) -> dict[str, Any]:
+    ensure_db()
+    now = _now_iso()
+    item = {
+        "id": str(row.get("id") or f"{row.get('campaign_id')}:{row.get('agent_key')}"),
+        "campaign_id": str(row.get("campaign_id") or ""),
+        "agent_key": str(row.get("agent_key") or ""),
+        "status": str(row.get("status") or "queued"),
+        "message": str(row.get("message") or ""),
+        "progress": float(row.get("progress") or 0),
+        "updated_at": now,
+    }
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO pipeline_agents (id, campaign_id, agent_key, status, message, progress, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                status = excluded.status,
+                message = excluded.message,
+                progress = excluded.progress,
+                updated_at = excluded.updated_at
+            """,
+            (
+                item["id"],
+                item["campaign_id"],
+                item["agent_key"],
+                item["status"],
+                item["message"],
+                item["progress"],
+                item["updated_at"],
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return item
+
+
+def list_pipeline_agents(campaign_id: str | None = None) -> list[dict[str, Any]]:
+    ensure_db()
+    db = connect()
+    try:
+        if campaign_id:
+            rows = db.execute(
+                """
+                SELECT id, campaign_id, agent_key, status, message, progress, updated_at
+                FROM pipeline_agents WHERE campaign_id = ? ORDER BY updated_at DESC
+                """,
+                (campaign_id,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT id, campaign_id, agent_key, status, message, progress, updated_at
+                FROM pipeline_agents ORDER BY updated_at DESC LIMIT 80
+                """
+            ).fetchall()
+    finally:
+        db.close()
+    keys = ("id", "campaign_id", "agent_key", "status", "message", "progress", "updated_at")
+    return [_as_dict(row, keys) for row in rows]
 
 
 def reset_migrate_flag() -> None:

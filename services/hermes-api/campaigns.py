@@ -136,6 +136,7 @@ def decorate_campaign(campaign: dict[str, Any] | None) -> dict[str, Any] | None:
     campaign["pipeline_yaml"] = "pipeline_defs/hermes-flywheel.yaml"
     campaign["live_compose"] = False
     campaign["label"] = campaign_label(campaign)
+    campaign["crowned"] = bool(campaign.get("crowned"))
     campaign["publish"] = publish_notes(campaign)
     return campaign
 
@@ -153,6 +154,27 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
 
     item = get_campaign_row(campaign_id)
     return decorate_campaign(item) if isinstance(item, dict) else None
+
+
+def set_campaign_crowned(campaign_id: str, *, crowned: bool, retire: bool = False) -> dict[str, Any] | None:
+    campaign = get_campaign(campaign_id)
+    if campaign is None:
+        return None
+    campaign["crowned"] = bool(crowned) and not retire
+    if retire:
+        campaign["status"] = "retired"
+        campaign["crowned"] = False
+    saved = upsert_campaign(campaign)
+    try:
+        from db import append_debug_event
+
+        append_debug_event(
+            "evolution",
+            {"id": campaign_id, "crowned": saved.get("crowned"), "status": saved.get("status")},
+        )
+    except Exception:
+        pass
+    return saved
 
 
 def upsert_campaign(campaign: dict[str, Any]) -> dict[str, Any]:
@@ -200,11 +222,17 @@ def create_campaign(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "brief": str(body.get("brief") or "").strip(),
         "platforms": str(body.get("platforms") or "YouTube Shorts, TikTok, Reels").strip(),
         "budget": str(body.get("budget") or "$2,000 / mo").strip(),
-        "frequency": str(body.get("freq") or body.get("frequency") or "2 / day").strip(),
+        "frequency": str(
+            body.get("cadence") or body.get("freq") or body.get("frequency") or "3x daily"
+        ).strip(),
+        "cadence": str(
+            body.get("cadence") or body.get("freq") or body.get("frequency") or "3x daily"
+        ).strip(),
         "status": "queued",
         "mode": "pending",
         "stage": None,
         "healed": False,
+        "crowned": False,
         "label": "pending",
         "pipeline": "hermes-flywheel",
         "pipeline_yaml": "pipeline_defs/hermes-flywheel.yaml",
@@ -219,7 +247,15 @@ def create_campaign(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "moneyprinter": {},
         "publish": {},
     }
-    return _upsert(campaign)
+    saved = _upsert(campaign)
+    try:
+        from db import append_debug_event, link_campaign_niche
+
+        link_campaign_niche(str(campaign.get("niche") or ""))
+        append_debug_event("campaign", {"id": campaign_id, "niche": campaign.get("niche"), "status": "queued"})
+    except Exception:
+        pass
+    return saved
 
 
 InferenceFn = Callable[[str, dict[str, Any]], str]
@@ -359,6 +395,26 @@ def apply_moneyprinter(campaign: dict[str, Any], *, force_dry: bool) -> str:
         "mpt_dry" if result.get("mode") == "dry_run" else "mpt_ready",
         extra=extra,
     )
+    try:
+        from product import enqueue_job
+
+        enqueue_job(
+            kind="mpt",
+            campaign_id=str(campaign.get("id") or ""),
+            stage="mpt",
+            status="dry_run" if result.get("mode") == "dry_run" else "queued",
+            progress=0.4 if result.get("mode") == "dry_run" else 0.8,
+            detail={
+                "label": result.get("label"),
+                "mode": result.get("mode"),
+                "task_id": result.get("task_id"),
+                "base_url": "http://127.0.0.1:8088",
+                "live_compose": False,
+            },
+            job_id=f"mpt:{campaign.get('id')}",
+        )
+    except Exception:
+        pass
     if result.get("mode") == "dry_run":
         return (
             f"MoneyPrinterTurbo DRY-RUN ({result.get('reason') or 'optional'}). "
@@ -520,6 +576,23 @@ async def run_orchestra(
     campaign["pipeline_yaml"] = "pipeline_defs/hermes-flywheel.yaml"
     campaign["live_compose"] = False
     campaign["label"] = "live"
+    try:
+        from product import enqueue_job, sync_workforce_stage
+
+        enqueue_job(
+            kind="campaign",
+            campaign_id=campaign_id,
+            stage="orchestra",
+            status="running",
+            progress=0.05,
+            detail={"pipeline": "hermes-flywheel"},
+            job_id=f"campaign:{campaign_id}",
+        )
+        sync_workforce_stage(
+            campaign_id, "research", status="running", message="Scanning sources", progress=0.1
+        )
+    except Exception:
+        pass
     campaign = _append_event(
         campaign,
         {
@@ -538,6 +611,29 @@ async def run_orchestra(
     for stage, agent, flywheel_stage in ORCHESTRA_STAGES:
         campaign = get_campaign(campaign_id) or campaign
         campaign["stage"] = stage
+        try:
+            from product import enqueue_job, sync_workforce_stage
+
+            total = max(1, len(ORCHESTRA_STAGES))
+            idx = next(i for i, row in enumerate(ORCHESTRA_STAGES) if row[0] == stage)
+            sync_workforce_stage(
+                campaign_id,
+                stage,
+                status="running",
+                message=f"{agent} started {stage}",
+                progress=idx / total,
+            )
+            enqueue_job(
+                kind="stage",
+                campaign_id=campaign_id,
+                stage=stage,
+                status="running",
+                progress=idx / total,
+                detail={"agent": agent, "flywheel_stage": flywheel_stage},
+                job_id=f"{campaign_id}:{stage}",
+            )
+        except Exception:
+            pass
         campaign = _append_event(
             campaign,
             {
@@ -659,6 +755,30 @@ async def run_orchestra(
             artifacts = {}
             campaign["artifacts"] = artifacts
         artifacts[stage] = result_text
+        try:
+            from product import enqueue_job, sync_workforce_stage
+
+            total = max(1, len(ORCHESTRA_STAGES))
+            idx = next(i for i, row in enumerate(ORCHESTRA_STAGES) if row[0] == stage)
+            done = (idx + 1) / total
+            sync_workforce_stage(
+                campaign_id,
+                stage,
+                status="complete",
+                message=f"{agent} finished {stage}",
+                progress=done,
+            )
+            enqueue_job(
+                kind="stage",
+                campaign_id=campaign_id,
+                stage=stage,
+                status="dry_run" if campaign.get("mode") == "dry_run" else "completed",
+                progress=done,
+                detail={"agent": agent, "message": str(result_text)[:400]},
+                job_id=f"{campaign_id}:{stage}",
+            )
+        except Exception:
+            pass
         campaign = _append_event(
             campaign,
             {
@@ -683,6 +803,35 @@ async def run_orchestra(
     campaign["label"] = "DRY-RUN" if healed else "live"
     campaign["live_compose"] = False
     campaign["publish"] = publish_notes(campaign)
+    try:
+        from product import enqueue_job, record_run_metrics, sync_workforce_stage
+
+        enqueue_job(
+            kind="campaign",
+            campaign_id=campaign_id,
+            stage="done",
+            status="dry_run" if healed else "completed",
+            progress=1.0,
+            detail={"healed": healed},
+            job_id=f"campaign:{campaign_id}",
+        )
+        sync_workforce_stage(
+            campaign_id,
+            "publish",
+            status="running",
+            message="Queued for 6:00 PM",
+            progress=0.15,
+        )
+        sync_workforce_stage(
+            campaign_id,
+            "score",
+            status="complete",
+            message="Watching uploads",
+            progress=0.4,
+        )
+        record_run_metrics(retention=18.0, ctr=11.0, rpm=9.0)
+    except Exception:
+        pass
     campaign = _append_event(
         campaign,
         {

@@ -69,14 +69,8 @@ function apiFetch(url, options) {
   return fetch(url, { ...opts, headers });
 }
 
-const TOPICS = [
-  ["Automation", "0.51", "0.82", "0.70", "0.82"],
-  ["Claude", "0.44", "0.79", "0.74", "0.86"],
-  ["UGC Product", "0.39", "0.71", "0.66", "0.80"],
-  ["Everyday Carry", "0.50", "0.82", "0.70", "0.82"],
-];
-
 const WALK_PLACEHOLDER = "/static/placeholders/walking-skeleton.svg";
+const dash = (v) => (v == null || v === "" ? "—" : String(v));
 
 function walkPanelHtml() {
   return `
@@ -119,36 +113,25 @@ const PAGES = {
         <p class="hint" id="billing-copy" style="margin-top:0.4rem"></p>
       </article>
       <div class="grid cols-4" style="margin-top:0.75rem">
-        ${card("Revenue", "$12.4k", "30d · +18%", true, true)}
-        ${card("Views", "2.1M", "Across channels")}
-        ${card("CTR", "6.8%", "+11% vs baseline")}
-        ${card("Retention", "54%", "+18% evolved")}
-        ${card("RPM", "$4.20", "+9%")}
-        ${card("Publishing queue", "14", "Scheduled")}
-        ${card("AI confidence", "0.91", "Prediction gate")}
-        ${card("Opportunities", "37", "High velocity")}
-        ${card("Knowledge nodes", "<span id=\"kg-node-count\">—</span>", "Living graph")}
-        ${card("Flywheel cycles", "<span id=\"flywheel-cycles\">—</span>", "Live /api/flywheel", true, true)}
-        ${card("Agents online", "14", "Orchestra ready")}
-        ${card("Channel health", "Strong", "Growth forecast ↑")}
+        ${card("Campaigns", "<span id=\"ov-campaigns\">—</span>", "GET /api/campaigns")}
+        ${card("Engine", "<span id=\"ov-engine\">—</span>", "engine label")}
+        ${card("Inference", "<span id=\"ov-infer\">—</span>", "engine.inference_down")}
+        ${card("Knowledge", "<span id=\"kg-node-count\">—</span>", "nodes")}
+        ${card("Flywheel", "<span id=\"flywheel-cycles\">—</span>", "GET /api/flywheel", true, true)}
+        ${card("Agents", "<span id=\"ov-agents\">—</span>", "GET /api/agents")}
+        ${card("Revenue", "—", "No live analytics")}
+        ${card("Views / CTR / RPM", "—", "Engine telemetry only")}
       </div>
       <div class="grid cols-2" style="margin-top:0.75rem">
         <article class="card">
-          <div class="label">AI activity</div>
-          <div class="feed" style="margin-top:0.7rem">
-            <div class="feed-item"><span>Research Agent: Found 6 high-velocity AI education topics</span><time>now</time></div>
-            <div class="feed-item"><span>Evolution Lab: Experiment #129 crowned thumbnail B winner</span><time>2m</time></div>
-            <div class="feed-item"><span>Publishing Agent: Queued 4 Shorts — YouTube + TikTok</span><time>8m</time></div>
-            <div class="feed-item"><span>Analytics Agent: Retention lift +18% after hook rewrite</span><time>14m</time></div>
-            <div class="feed-item muted"><span>Memory: Learned: money hooks +23% CTR</span><time>1h</time></div>
-          </div>
+          <div class="label">Live feed</div>
+          <div class="feed" id="ov-feed" style="margin-top:0.7rem"><p class="hint">—</p></div>
         </article>
         <article class="card">
           <div class="label">Operating loop</div>
-          <div class="pills" style="margin:0.8rem 0">
-            <span class="pill">Discover</span><span class="pill">Create</span><span class="pill">Publish</span><span class="pill">Learn</span><span class="pill on">Improve</span>
+          <div class="pills fly-loop" id="ov-loop" style="margin:0.8rem 0">
+            <span class="pill" data-fly="Discover">Discover</span><span class="pill" data-fly="Create">Create</span><span class="pill" data-fly="Publish">Publish</span><span class="pill" data-fly="Learn">Learn</span>
           </div>
-          <p class="hint">Every publish updates the knowledge graph and evolution weights for the next campaign.</p>
           <p class="hint" id="flywheel-status" style="margin-top:0.7rem">Flywheel: loading…</p>
         </article>
       </div>`;
@@ -158,22 +141,19 @@ const PAGES = {
       <p class="hint" id="agent-feed">Loading /api/agents/discovery…</p>
       <article class="card">
         <strong>AI opportunity scan</strong>
-        <div class="pills" style="margin:0.7rem 0">
-          ${["YouTube","Reddit","TikTok","Google Trends","X","News","Competitors"].map((c, i) =>
-            `<button type="button" class="pill${i < 4 ? " on" : ""}" data-research="${c}">${c}</button>`
-          ).join("")}
-        </div>
-        <p class="hint" id="research-status">Chip a source to POST /api/agent/research.</p>
+        <div class="pills" id="discovery-sources" style="margin:0.7rem 0"></div>
+        <p class="hint" id="research-status">GET /api/discovery sources · POST /api/agent/research.</p>
+        <div class="pills" id="discovery-topic-chips" style="margin-top:0.6rem"></div>
       </article>
       <div class="grid cols-4" style="margin-top:0.75rem">
         ${card("Trending", "<span id=\"disc-trending\">—</span>", "Stored nodes")}
         ${card("Emerging", "<span id=\"disc-emerging\">—</span>", "Research source")}
         ${card("Low competition", "<span id=\"disc-open\">—</span>", "Whitespace")}
-        ${card("Avg virality", "<span id=\"disc-viral\">—</span>", "From graph", true, true)}
+        ${card("Opportunities", "<span id=\"disc-viral\">—</span>", "GET /api/discovery", true, true)}
       </div>
       <article class="card" style="margin-top:0.75rem">
         <strong>High-opportunity topics</strong>
-        <div id="discovery-nodes"><p class="hint">Loading stored knowledge nodes…</p></div>
+        <div id="discovery-nodes"><p class="hint">Loading GET /api/discovery opportunities…</p></div>
       </article>`;
   },
   knowledge() {
@@ -186,13 +166,8 @@ const PAGES = {
       </div>
       <article class="card" style="margin-top:0.75rem">
         <strong>Living knowledge graph</strong>
-        <div class="chain" style="margin:0.85rem 0">
-          <span>Topic</span><i class="arrow">→</i><span>Audience</span><i class="arrow">→</i>
-          <span>Hooks</span><i class="arrow">→</i><span>Scripts</span><i class="arrow">→</i>
-          <span>Videos</span><i class="arrow">→</i><span>Analytics</span><i class="arrow">→</i>
-          <span class="end">Updated Graph</span>
-        </div>
-        <p class="hint">Every publish strengthens the graph. Hermes doesn’t store files — it stores causal media intelligence.</p>
+        <svg id="kg-svg" class="kg-svg" role="img" aria-label="Knowledge graph"></svg>
+        <p class="hint" id="kg-empty">GET /api/knowledge/graph with nodes fallback.</p>
       </article>
       <article class="card" style="margin-top:0.75rem">
         <strong>Stored nodes</strong>
@@ -216,6 +191,8 @@ const PAGES = {
         <article class="card">
           <strong>Active cuts</strong>
           <div id="active-cuts"><p class="hint">Launch the video-campaign agent to plan cuts.</p></div>
+          <strong style="display:block;margin-top:0.8rem">Campaigns</strong>
+          <div id="active-campaigns"><p class="hint">Loading GET /api/campaigns…</p></div>
         </article>
       </div>
       ${walkPanelHtml()}`;
@@ -225,13 +202,19 @@ const PAGES = {
       <p class="hint" id="agent-feed">Loading /api/agents/orchestra…</p>
       <div class="grid cols-4">
         ${card("CEO", "Hermes OS Orchestrator", "Orchestrator")}
-        ${card("Agents", "14", "OS + kernel")}
-        ${card("Healthy", "98%", "Runtime health", true, true)}
-        ${card("Platform", "hermestudios.com", "Reliability layer")}
+        ${card("Workforce", "<span id=\"orch-count\">—</span>", "GET /api/orchestra/pipeline")}
+        ${card("Healthy", "<span id=\"orch-healthy\">—</span>", "LM Studio", true, true)}
+        ${card("Jobs", "<span id=\"orch-platform\">—</span>", "GET /api/jobs")}
       </div>
+      <p class="hint" id="tick-label"></p>
+      <div class="pills" id="orch-health-chips" style="margin-top:0.5rem"></div>
       <article class="card" style="margin-top:0.75rem">
-        <strong>Organization</strong>
-        <p class="hint" style="margin:0.6rem 0 0">Research · Writer · Editor · Publisher · Analyst — reporting to the orchestrator.</p>
+        <strong>Workforce · 8 agents</strong>
+        <div class="orch-grid" id="orch-grid"><p class="hint">Loading GET /api/orchestra/pipeline…</p></div>
+      </article>
+      <article class="card" style="margin-top:0.75rem">
+        <strong>Jobs</strong>
+        <div id="job-list"><p class="hint">Loading GET /api/jobs…</p></div>
       </article>
       <article class="card" style="margin-top:0.75rem">
         <strong>Live event stream</strong>
@@ -239,6 +222,8 @@ const PAGES = {
         <div style="display:flex;gap:0.5rem;margin-top:0.8rem;flex-wrap:wrap">
           <button type="button" class="primary" id="dry-run">Run dry-run campaign</button>
           <button type="button" class="ghost" data-go="debugger">AI Debugger</button>
+          <button type="button" class="primary" id="agents-tick">Tick 14 category agents</button>
+          <button type="button" class="ghost" data-go="command">Command Center</button>
         </div>
       </article>`;
   },
@@ -265,11 +250,13 @@ const PAGES = {
       </article>`;
   },
   studio() {
-    return `<article class="card"><strong>Studio</strong><p class="hint" id="agent-feed">Loading /api/agents/studio…</p><p class="hint">Scene stack for Hermes OS — Platform Promo and Everyday Carry.</p></article>${walkPanelHtml()}`;
+    return `<article class="card"><strong>Studio</strong><p class="hint" id="agent-feed">Loading /api/agents/studio…</p>
+      <div class="studio-timeline" id="studio-timeline"><p class="hint">Run walking skeleton to fill beats.</p></div>
+    </article>${walkPanelHtml()}`;
   },
   evolution() {
     return `<p class="hint" id="agent-feed">Loading /api/agents/evolution…</p>
-      <div class="grid cols-3">${card("Flywheel cycles","—","Live ticks",true,true)}${card("Crowned","#129","Thumbnail B")}${card("Lift","+18%","Retention")}</div>
+      <div class="grid cols-3">${card("Flywheel","<span id=\"flywheel-cycles\">—</span>","Live ticks",true,true)}${card("Promoted","<span id=\"evo-done\">—</span>","variants")}${card("Archived","<span id=\"evo-healed\">—</span>","variants")}</div>
       <article class="card" style="margin-top:0.75rem">
         <strong>Perpetual flywheel</strong>
         <p class="hint" id="flywheel-status">Loading /api/flywheel…</p>
@@ -277,14 +264,16 @@ const PAGES = {
           <button type="button" class="primary" id="flywheel-start">Start flywheel</button>
           <button type="button" class="ghost" id="flywheel-stop">Stop</button>
         </div>
-      </article>`;
+      </article>
+      <article class="card" style="margin-top:0.75rem"><strong>Evolution</strong><p class="hint" id="evo-status">GET /api/evolution experiments</p><div id="evo-list"></div></article>`;
   },
   analytics() {
     return `<p class="hint" id="agent-feed">Loading /api/agents/analytics…</p>
-      <div class="grid cols-4">${card("Views","2.1M","Across channels")}${card("CTR","6.8%","+11%")}${card("Retention","54%","+18% evolved")}${card("RPM","$4.20","+9%")}</div>`;
+      <div class="grid cols-4">${card("Ticks","<span id=\"an-ticks\">—</span>","tick_total")}${card("Campaigns","<span id=\"an-campaigns\">—</span>","by label")}${card("Knowledge","<span id=\"an-kg\">—</span>","nodes")}${card("Research","<span id=\"an-research\">—</span>","live vs DRY-RUN",true,true)}</div>
+      <article class="card" style="margin-top:0.75rem"><h2 id="an-headline">Compounding</h2><div id="an-cards" class="grid cols-3"></div><svg id="analytics-svg" class="analytics-svg"></svg><p class="hint" id="an-status">GET /api/analytics ~10s</p></article>`;
   },
   memory() {
-    return `<article class="card"><strong>Memory agent</strong><p class="hint" id="agent-feed">Loading /api/agents/memory…</p><p class="hint">Money hooks +23% CTR. Graph stores causal media intelligence.</p></article>`;
+    return `<article class="card"><strong>Memory agent</strong><p class="hint" id="agent-feed">Loading /api/agents/memory…</p><p class="hint" id="mem-status">GET /api/memory</p><div id="mem-list"></div></article>`;
   },
   command() {
     return `<p class="hint" id="agent-feed">Loading /api/agents/command…</p>
@@ -417,6 +406,14 @@ function wire(id) {
   if (id === "settings" || id === "overview" || id === "evolution") loadBilling();
   if (id === "overview" || id === "evolution") loadFlywheel();
   if (id === "overview" || id === "discovery" || id === "knowledge") loadKnowledge();
+  if (id === "overview") osOverview();
+  if (id === "discovery") osDiscovery();
+  if (id === "knowledge") osGraph();
+  if (id === "orchestra") { osOrchestra(); osJobs(); }
+  if (id === "campaigns") osCampaigns();
+  if (id === "evolution") osEvolution();
+  if (id === "analytics") osAnalytics();
+  if (id === "memory") osMemory();
   loadAgent(id);
   bindBilling();
   bindSettings();
@@ -552,6 +549,236 @@ function loadKnowledge() {
       const list = document.getElementById("discovery-nodes");
       if (list) list.textContent = String(e);
     });
+}
+
+function osOverview() {
+  Promise.all([fetch("/api/campaigns"), fetch("/api/flywheel"), fetch("/api/agents")])
+    .then(async ([cR, fR, aR]) => {
+      const c = cR.ok ? await cR.json() : {};
+      const f = fR.ok ? await fR.json() : {};
+      const a = aR.ok ? await aR.json() : {};
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = dash(v); };
+      const items = c.campaigns || [];
+      const eng = c.engine || {};
+      set("ov-campaigns", items.length);
+      set("ov-engine", eng.flywheel_label || eng.pipeline);
+      set("ov-infer", eng.inference_down ? "down" : "up");
+      set("ov-agents", a.count || (a.categories || []).length);
+      const feed = document.getElementById("ov-feed");
+      const ticks = f.ticks || [];
+      if (feed) {
+        feed.innerHTML = ticks.length
+          ? ticks.slice(-6).reverse().map((t) => `<div class="feed-item"><span>${t.label || t.message || ""}</span><time>${t.stage || ""}</time></div>`).join("")
+          : `<p class="hint">—</p>`;
+      }
+    })
+    .catch(() => {});
+}
+
+function osDiscovery() {
+  fetch("/api/discovery").then((r) => r.json()).then((d) => {
+    const topics = d.topics || [];
+    const ops = d.opportunities || [];
+    const sources = d.sources || [];
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = dash(v); };
+    set("disc-trending", d.count != null ? d.count : topics.length);
+    set("disc-viral", d.opportunity_count != null ? d.opportunity_count : ops.length);
+    const srcEl = document.getElementById("discovery-sources");
+    if (srcEl) {
+      srcEl.innerHTML = sources.map((s, i) =>
+        `<button type="button" class="pill${s.status === "live" || i < 3 ? " on" : ""}" data-research="${s.name}">${s.name} · ${s.status || s.kind}</button>`
+      ).join("");
+    }
+    const list = document.getElementById("discovery-nodes");
+    const rows = ops.length ? ops : topics;
+    if (list) {
+      list.innerHTML = rows.length
+        ? rows.map((o, i) => `<div class="row"><div><strong>${String(o.rank || i + 1).toString().padStart(2, "0")} ${o.title || o.name || o.topic}</strong><div class="hint">${o.source || o.trend || ""}</div></div><div>${o.score ?? ""}</div></div>`).join("")
+        : `<p class="hint">No opportunities yet.</p>`;
+    }
+    const chips = document.getElementById("discovery-topic-chips");
+    if (chips) {
+      chips.innerHTML = topics.map((t) => {
+        const name = t.name || t.topic;
+        const dry = JSON.stringify(t).toLowerCase().includes("dry");
+        return `<button type="button" class="pill" data-research="${name}">${name} · ${t.mode || t.label || (dry ? "DRY-RUN" : "stored")}</button>`;
+      }).join("") || `<span class="pill">No topics</span>`;
+    }
+    bindResearch();
+  }).catch(() => {});
+}
+
+function osGraph() {
+  const draw = (graph) => {
+    const svgEl = document.getElementById("kg-svg");
+    if (!svgEl || typeof d3 === "undefined") return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+    const nodes = (graph.nodes || []).map((n, i) => ({ id: String(n.id || n.topic || i), topic: n.topic || n.name, trend: n.trend || "" }));
+    if (!nodes.length) return;
+    const w = svgEl.clientWidth || 640, h = 320;
+    svg.attr("viewBox", [0, 0, w, h]);
+    const sim = d3.forceSimulation(nodes).force("charge", d3.forceManyBody().strength(-160)).force("center", d3.forceCenter(w / 2, h / 2));
+    const node = svg.selectAll("circle").data(nodes).join("circle").attr("r", 8).attr("fill", "#5ee9a4")
+      .call(d3.drag().on("drag", (event, d) => { d.x = event.x; d.y = event.y; }));
+    node.append("title").text((d) => `${d.topic}: ${d.trend || "—"}`);
+    sim.on("tick", () => node.attr("cx", (d) => d.x).attr("cy", (d) => d.y));
+  };
+  fetch("/api/knowledge/graph").then(async (r) => {
+    if (r.ok) return r.json();
+    const n = await (await fetch("/api/knowledge/nodes")).json();
+    return { nodes: n.nodes || [], links: [] };
+  }).then(draw).catch(() => {});
+}
+
+function osOrchestra() {
+    Promise.all([fetch("/api/agents"), fetch("/health"), fetch("/api/orchestra/pipeline")]).then(async ([aR, hR, pR]) => {
+    const a = aR.ok ? await aR.json() : {};
+    const h = hR.ok ? await hR.json() : {};
+    const pipe = pR && pR.ok ? await pR.json() : {};
+    const cats = a.categories || [];
+    const inf = (h.inference || h.lm_studio || {});
+    const mpt = h.moneyprinter || h.mpt || {};
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = dash(v); };
+    set("orch-count", (pipe.agents || []).length || 8);
+    set("orch-healthy", inf.reachable ? "lm_studio" : "down");
+    const chips = document.getElementById("orch-health-chips");
+    if (chips) chips.innerHTML = `<span class="pill">${inf.reachable ? "lm_studio" : "inference down"}</span><span class="pill">${pipe.live_count != null ? pipe.live_count + " live" : ""}</span><span class="pill">${cats.length} category nav</span><span class="pill">MPT ${mpt.ok || mpt.reachable ? "up" : "—"}</span>`;
+    const grid = document.getElementById("orch-grid");
+    const workforce = pipe.agents || [];
+    if (grid) {
+      grid.innerHTML = (workforce.length ? workforce : cats).map((c) => `<article class="orch-card"><strong>${c.title || c.key || c.id}</strong><div class="hint">${c.status || ""} · ${c.message || (c.result || c).label || ""}</div></article>`).join("");
+    }
+  }).catch(() => {});
+  const tick = document.getElementById("agents-tick");
+  if (tick) {
+    tick.addEventListener("click", async () => {
+      const r = await apiFetch("/api/agents/tick", { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      const el = document.getElementById("tick-label");
+      if (el) el.textContent = dash(j.label || (j.tick && j.tick.label));
+      osOrchestra();
+      osJobs();
+    });
+  }
+}
+
+function osJobs() {
+  fetch("/api/jobs").then((r) => r.json()).then((d) => {
+    const jobs = d.jobs || [];
+    const set = document.getElementById("orch-platform");
+    if (set) set.textContent = dash(d.count != null ? d.count : jobs.length);
+    const list = document.getElementById("job-list");
+    if (list) {
+      list.innerHTML = jobs.length
+        ? jobs.map((j) => `<div class="row"><strong>${j.kind || j.stage || j.id}</strong><span class="hint">${j.status}</span></div>`).join("")
+        : `<p class="hint">No jobs yet.</p>`;
+    }
+  }).catch(() => {});
+}
+
+function osMemory() {
+  fetch("/api/memory").then((r) => r.json()).then((d) => {
+    const status = document.getElementById("mem-status");
+    if (status) status.textContent = `GET /api/memory · ${dash(d.title || d.count)}`;
+    const list = document.getElementById("mem-list");
+    const items = d.items || [];
+    if (list) {
+      list.innerHTML = items.length
+        ? items.map((m) => `<div class="row"><strong>${m.insight || m.title}</strong><span>+${dash(m.lift)}%</span></div>`).join("")
+        : `<p class="hint">No learnings yet.</p>`;
+    }
+  }).catch(() => {});
+}
+
+function osCampaigns() {
+  fetch("/api/campaigns").then((r) => r.json()).then((d) => {
+    const box = document.getElementById("active-campaigns");
+    const items = d.campaigns || [];
+    if (!box) return;
+    box.innerHTML = items.length
+      ? items.map((c) => `<div class="row"><div><strong>${c.niche || c.id}</strong><div class="hint">${c.status} · ${c.label || c.mode || ""} ${c.healed ? "healed" : ""}</div></div></div>`).join("")
+      : `<p class="hint">No campaigns yet.</p>`;
+  }).catch((e) => {
+    const box = document.getElementById("active-campaigns");
+    if (box) box.textContent = String(e);
+  });
+}
+
+function osEvolution() {
+  const paintVariants = (variants, note, data) => {
+    const status = document.getElementById("evo-status");
+    if (status) status.textContent = note;
+    const dEl = document.getElementById("evo-done");
+    const hEl = document.getElementById("evo-healed");
+    if (dEl) dEl.textContent = dash(data.winners_promoted);
+    if (hEl) hEl.textContent = dash(data.archived_count);
+    const list = document.getElementById("evo-list");
+    if (!list) return;
+    list.innerHTML = variants.map((v) => `<div class="row"><div><strong>${v.label || v.id}</strong><div class="hint">${v.state} · ${v.score ?? ""}</div></div><button type="button" class="primary" data-promote="${v.id}">Promote</button><button type="button" class="ghost" data-archive="${v.id}">Archive</button></div>`).join("");
+    list.querySelectorAll("[data-promote]").forEach((b) => b.addEventListener("click", async () => {
+      await apiFetch(`/api/evolution/variants/${b.dataset.promote}/promote`, { method: "POST" });
+      osEvolution();
+    }));
+    list.querySelectorAll("[data-archive]").forEach((b) => b.addEventListener("click", async () => {
+      await apiFetch(`/api/evolution/variants/${b.dataset.archive}/archive`, { method: "POST" });
+      osEvolution();
+    }));
+  };
+  fetch("/api/evolution").then(async (r) => {
+    if (!r.ok) return;
+    const d = await r.json();
+    const latest = d.latest || (d.experiments || [])[0];
+    const variants = (latest && latest.variants) || [];
+    if (variants.length) {
+      paintVariants(variants, "GET /api/evolution", d);
+      return;
+    }
+    const rows = d.campaigns || [];
+    const status = document.getElementById("evo-status");
+    if (status) status.textContent = "GET /api/evolution";
+    const list = document.getElementById("evo-list");
+    if (list) list.innerHTML = rows.map((c) => `<div class="row"><div><strong>${c.niche || c.id}</strong></div></div>`).join("") || `<p class="hint">No experiments yet.</p>`;
+  }).catch(() => {});
+}
+
+function osAnalytics() {
+  const draw = (bars) => {
+    const svgEl = document.getElementById("analytics-svg");
+    if (!svgEl || typeof d3 === "undefined" || !bars.length) return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+    const w = svgEl.clientWidth || 640, h = 280, m = { t: 12, r: 12, b: 40, l: 36 };
+    const x = d3.scaleBand().domain(bars.map((d) => d.category)).range([0, w - m.l - m.r]).padding(0.2);
+    const y = d3.scaleLinear().domain([0, d3.max(bars, (d) => d.value) || 1]).range([h - m.t - m.b, 0]);
+    const g = svg.attr("viewBox", [0, 0, w, h]).append("g").attr("transform", `translate(${m.l},${m.t})`);
+    g.selectAll("rect").data(bars).join("rect").attr("x", (d) => x(d.category)).attr("y", (d) => y(d.value))
+      .attr("width", x.bandwidth()).attr("height", (d) => h - m.t - m.b - y(d.value)).attr("fill", "#5ee9a4");
+  };
+  fetch("/api/analytics").then(async (r) => {
+    if (r.ok) {
+      const s = await r.json();
+      const compounding = s.compounding || {};
+      const cards = compounding.cards || [];
+      const map = s.campaigns_by_label || s.campaigns || {};
+      const bars = cards.length
+        ? cards.map((c) => ({ category: c.label || c.metric, value: Number(c.value) || 0 }))
+        : (typeof map === "object" ? Object.entries(map).map(([category, value]) => ({ category, value: Number(value) || 0 })) : []);
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = dash(v); };
+      set("an-ticks", s.tick_total);
+      set("an-kg", s.knowledge_count);
+      set("an-campaigns", s.campaign_count != null ? s.campaign_count : Object.keys(map).length);
+      const res = s.research || {};
+      set("an-research", `${dash(res.live)}/${dash(res.dry_run)}`);
+      const headline = document.getElementById("an-headline");
+      if (headline) headline.textContent = compounding.headline || "Compounding";
+      const cardBox = document.getElementById("an-cards");
+      if (cardBox && cards.length) {
+        cardBox.innerHTML = cards.map((c) => `<article class="card"><strong>${c.label}</strong><div>${c.value} ${c.trend || ""}</div></article>`).join("");
+      }
+      draw(bars.length ? bars : [{ category: "ticks", value: Number(s.tick_total) || 0 }]);
+    }
+  }).catch(() => {});
 }
 
 function loadFlywheel() {

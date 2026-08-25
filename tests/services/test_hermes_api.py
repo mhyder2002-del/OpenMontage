@@ -505,6 +505,15 @@ def test_console_pages_bind_every_category_agent():
     assert "db.py" in dockerfile
     assert "research.py" in dockerfile
     assert "walking_skeleton.py" in dockerfile
+    assert "product.py" in dockerfile
+    assert "/api/orchestra/pipeline" in os_js
+    assert "/api/orchestra/pipeline" in app_js
+    assert "/api/jobs" in os_js
+    assert "/api/jobs" in app_js
+    assert "/api/memory" in os_js
+    assert "/api/memory" in app_js
+    assert "/api/evolution/variants/" in os_js
+    assert "/api/evolution/variants/" in app_js
     assert "moneyprinter.py" in dockerfile
     assert "/readyz" in dockerfile
     assert "/api/knowledge/nodes" in os_js
@@ -616,6 +625,8 @@ def test_mutating_api_auth_503_vs_401(monkeypatch, tmp_path):
     assert http.post("/api/flywheel/start").status_code == 503
     assert http.post("/api/campaigns/x/launch").status_code == 503
     assert http.post("/api/agents/tick").status_code == 503
+    assert http.post("/api/evolution/x/crown").status_code == 503
+    assert http.post("/api/product/bootstrap").status_code == 503
     assert http.post("/api/v1/scripts", json={"topic": "AI", "audience": "devs"}).status_code == 503
 
     token = "unit-test-bearer"
@@ -626,6 +637,7 @@ def test_mutating_api_auth_503_vs_401(monkeypatch, tmp_path):
     assert http.post("/api/flywheel/start").status_code == 401
     assert http.post("/api/agents/tick").status_code == 401
     assert http.post("/api/campaigns/missing/launch").status_code == 401
+    assert http.post("/api/evolution/missing/crown").status_code == 401
     created = http.post(
         "/api/campaigns",
         json={"niche": "x", "launch": False},
@@ -728,4 +740,177 @@ def test_flywheel_origin_from_public_domain(monkeypatch, tmp_path):
     snap = http.get("/api/flywheel")
     assert snap.status_code == 200
     assert snap.json()["origin"] == "https://hermestudios.com"
+
+
+def test_discovery_recency_and_knowledge_graph_links(client):
+    http, _ = client
+    first = http.post("/api/agent/research", json={"topic": "Claude"})
+    second = http.post("/api/agent/research", json={"topic": "Shorts"})
+    assert first.status_code == 200
+    assert second.status_code == 200
+    discovery = http.get("/api/discovery")
+    assert discovery.status_code == 200
+    body = discovery.json()
+    names = {t["name"] for t in body["topics"]}
+    assert "Claude" in names and "Shorts" in names
+    for topic in body["topics"]:
+        assert "recency_score" in topic
+        assert 0 <= float(topic["recency_score"]) <= 1
+        assert topic["mode"] in {"dry_run", "live", "pending"}
+        assert topic["label"] in {"DRY-RUN", "live", "pending"}
+        assert "wikipedia" not in topic
+    graph = http.get("/api/knowledge/graph")
+    assert graph.status_code == 200
+    payload = graph.json()
+    assert "nodes" in payload and "links" in payload
+    assert payload["count"] >= 2
+    assert any(
+        {link["source"], link["target"]} == {"claude", "shorts"}
+        or {link["source"], link["target"]} == {"Claude", "Shorts"}
+        for link in payload["links"]
+    )
+    nodes = http.get("/api/knowledge/nodes")
+    assert nodes.status_code == 200
+    assert nodes.json()["count"] >= 2
+
+
+def test_analytics_shape_and_evolution_crown(client):
+    http, _ = client
+    http.post("/api/agent/research", json={"topic": "Analytics"})
+    created = http.post("/api/campaigns", json={"niche": "Analytics", "launch": False})
+    assert created.status_code == 200
+    cid = created.json()["id"]
+    analytics = http.get("/api/analytics")
+    assert analytics.status_code == 200
+    snap = analytics.json()
+    assert "tick_total" in snap
+    assert "campaigns_by_label" in snap
+    assert isinstance(snap["campaigns_by_label"], dict)
+    assert snap["knowledge_count"] >= 1
+    assert snap["campaign_count"] >= 1
+    assert "research" in snap
+    evo = http.get("/api/evolution")
+    assert evo.status_code == 200
+    assert any(row["id"] == cid for row in evo.json()["campaigns"])
+    crowned = http.post(f"/api/evolution/{cid}/crown")
+    assert crowned.status_code == 200
+    assert crowned.json()["crowned"] is True
+    listed = http.get("/api/evolution").json()
+    assert any(row["id"] == cid and row["crowned"] for row in listed["crowned"])
+    retired = http.post(f"/api/evolution/{cid}/retire")
+    assert retired.status_code == 200
+    assert retired.json()["crowned"] is False
+    assert retired.json()["status"] == "retired"
+    dbg = http.get("/api/debugger")
+    assert dbg.status_code == 200
+    assert isinstance(dbg.json()["events"], list)
+    health = http.get("/health").json()
+    assert health["lm_studio"]["status"] in {"up", "down"}
+    assert "enabled" in health["moneyprinter"]
+    status = http.get("/api/status").json()
+    assert status["lm_studio"]["status"] in {"up", "down"}
+    assert "moneyprinter" in status
+
+
+def test_os_get_routes_stay_public_when_key_set(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    import db as hermes_db
+
+    monkeypatch.setenv("PUBLIC_DOMAIN", "hermestudios.com")
+    monkeypatch.setenv("HERMES_API_KEY", "public-get-key")
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "public.db"))
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "public-campaigns.json"))
+    monkeypatch.setenv("HERMES_FLYWHEEL_STORE", str(tmp_path / "public-fw.json"))
+    monkeypatch.setenv("HERMES_AGENTS_STORE", str(tmp_path / "public-ag.json"))
+    monkeypatch.setenv("INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
+    hermes_db.reset_migrate_flag()
+    http = TestClient(_load_app().app)
+    for path in (
+        "/api/discovery",
+        "/api/knowledge/nodes",
+        "/api/knowledge/graph",
+        "/api/analytics",
+        "/api/evolution",
+        "/api/debugger",
+        "/api/jobs",
+        "/api/orchestra/pipeline",
+        "/api/memory",
+        "/health",
+        "/api/status",
+    ):
+        res = http.get(path)
+        assert res.status_code == 200, path
+    assert http.post("/api/evolution/missing/crown").status_code == 401
+    assert http.post("/api/product/bootstrap").status_code == 401
+
+
+def test_product_surfaces_jobs_orchestra_evolution_memory(client):
+    http, _ = client
+    boot = http.post("/api/product/bootstrap")
+    assert boot.status_code == 200
+    body = boot.json()
+    assert body["ok"] is True
+    assert len(body["opportunities"]) == 3
+    discovery = http.get("/api/discovery")
+    assert discovery.status_code == 200
+    disc = discovery.json()
+    assert [s["name"] for s in disc["sources"]] == [
+        "YouTube",
+        "TikTok",
+        "Reddit",
+        "Trends",
+        "X",
+        "News",
+        "Rivals",
+    ]
+    assert disc["opportunity_count"] >= 3
+    assert disc["opportunities"][0]["score"] >= disc["opportunities"][-1]["score"]
+    orch = http.get("/api/orchestra/pipeline")
+    assert orch.status_code == 200
+    keys = [a["key"] for a in orch.json()["agents"]]
+    assert keys == [
+        "research",
+        "hook",
+        "script",
+        "storyboard",
+        "narration",
+        "video",
+        "publishing",
+        "analytics",
+    ]
+    analytics = http.get("/api/analytics").json()
+    assert "compounding" in analytics
+    assert len(analytics["compounding"]["cards"]) == 3
+    evo = http.get("/api/evolution").json()
+    assert evo["latest"]["number"] == 129
+    assert evo["winners_promoted"] >= 1
+    variant_id = evo["latest"]["variants"][0]["id"]
+    promoted = http.post(f"/api/evolution/variants/{variant_id}/promote")
+    assert promoted.status_code == 200
+    assert promoted.json()["state"] == "promoted"
+    mem = http.get("/api/memory").json()
+    assert mem["count"] >= 2
+    created = http.post(
+        "/api/campaigns",
+        json={
+            "niche": "AI education",
+            "goal": "Subscriber growth",
+            "cadence": "3x daily",
+            "launch": False,
+        },
+    )
+    cid = created.json()["id"]
+    assert created.json()["cadence"] == "3x daily"
+    jobs = http.get(f"/api/jobs?campaign_id={cid}")
+    assert jobs.status_code == 200
+    missing = http.get("/api/jobs/does-not-exist")
+    assert missing.status_code == 404
+    assert http.post("/api/evolution/variants/missing/archive").status_code == 404
+    status = http.get("/api/status").json()
+    assert status["jobs"] == "/api/jobs"
+    catalog = json.loads((APP_DIR / "endpoints.json").read_text(encoding="utf-8"))
+    assert ("GET", "/api/jobs") in [(row["method"], row["path"]) for row in catalog]
+
 

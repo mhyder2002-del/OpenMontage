@@ -68,6 +68,7 @@ jobs:
             services/hermes-api/research.py,
             services/hermes-api/moneyprinter.py,
             services/hermes-api/walking_skeleton.py,
+            services/hermes-api/product.py,
             services/hermes-api/agents/**,
             services/hermes-api/static/**
           target: /opt/hermes-api

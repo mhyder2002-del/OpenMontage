@@ -123,8 +123,8 @@
     try {
       const h = await fetch("/health");
       const data = await h.json();
-      const inf = (data.inference || {}).reachable;
-      setChip("pill-health", inf ? "inference up" : "inference down", h.ok);
+      const inf = (data.inference || data.lm_studio || {});
+      setChip("pill-health", inf.reachable ? "lm_studio" : "inference down", h.ok && inf.reachable);
     } catch {
       setChip("pill-health", "health down", false);
     }
@@ -133,8 +133,8 @@
       const data = await f.json();
       setChip(
         "pill-flywheel",
-        "flywheel " + (data.running ? "running" : "stopped") + " · " + (data.cycle_count || 0),
-        f.ok
+        "flywheel " + (data.running ? "running" : "stopped") + " · " + (data.label || data.tick_total || data.cycle_count || 0),
+        f.ok && !data.inference_down
       );
     } catch {
       setChip("pill-flywheel", "flywheel n/a", false);
@@ -147,26 +147,12 @@
     }
   }
 
-  const topics = [
-    { name: "Automation", competition: 0.5, velocity: 0.82, viral: 0.7, conf: 0.82 },
-    { name: "Claude", competition: 0.61, velocity: 0.88, viral: 0.74, conf: 0.9 },
-    { name: "UGC Product", competition: 0.42, velocity: 0.76, viral: 0.69, conf: 0.81 },
-    { name: "Everyday Carry", competition: 0.38, velocity: 0.71, viral: 0.66, conf: 0.78 },
-  ];
-  const activity = [
-    ["Research Agent", "Found 6 high-velocity AI education topics", "now"],
-    ["Evolution Lab", "Experiment #129 crowned thumbnail B winner", "2m"],
-    ["Publishing Agent", "Queued 4 Shorts — YouTube + TikTok", "8m"],
-    ["Analytics Agent", "Retention lift +18% after hook rewrite", "14m"],
-    ["Memory", "Learned: money hooks ↑23% CTR", "1h"],
-  ];
-  const campaigns = [
-    ["Everyday Carry", "edc_tech · 7 scenes · 20s"],
-    ["Everyday Carry", "edc_tech_best · 7 scenes · 19.94s"],
-    ["Hermes OS — Platform Promo", "hermes_os_promo · 4 scenes · 12.6s"],
-  ];
+  let analyticsTimer = 0;
+  let kgSim = null;
 
   const WALK_PLACEHOLDER = "/static/placeholders/walking-skeleton.svg";
+  const dash = (v) => (v == null || v === "" ? "—" : String(v));
+  const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function metric(label, value, hint, accent) {
     return `<article class="card${accent ? " accent" : ""}"><span class="lbl">${label}</span><div class="val${accent ? " green" : ""}">${value}</div><div class="hint">${hint}</div></article>`;
@@ -217,48 +203,45 @@
           </div>
         </section>
         <div class="grid metrics" style="margin-top:0.75rem">
-          ${metric("Revenue", "$12.4k", "30d · +18%", true)}
-          ${metric("Views", "2.1M", "Across channels")}
-          ${metric("CTR", "6.8%", "+11% vs baseline")}
-          ${metric("Retention", "54%", "+18% evolved")}
-          ${metric("RPM", "$4.20", "+9%")}
-          ${metric("Publishing Queue", "14", "Scheduled")}
-          ${metric("AI Confidence", "0.91", "Prediction gate")}
-          ${metric("Opportunities", "37", "High velocity")}
-          ${metric("Knowledge Nodes", "<span id=\"kg-node-count\">—</span>", "Living graph")}
-          ${metric("Flywheel cycles", "<span id=\"flywheel-cycles\">—</span>", "Live self-check ticks")}
-          ${metric("Agents Online", "14", "Orchestra ready")}
-          ${metric("Channel Health", "Strong", "Growth forecast ↑")}
+          ${metric("Campaigns", "<span id=\"ov-campaigns\">—</span>", "GET /api/campaigns")}
+          ${metric("Engine", "<span id=\"ov-engine\">—</span>", "engine.flywheel_label")}
+          ${metric("Inference", "<span id=\"ov-infer\">—</span>", "engine.inference_down")}
+          ${metric("Knowledge", "<span id=\"kg-node-count\">—</span>", "GET /api/knowledge/nodes")}
+          ${metric("Flywheel ticks", "<span id=\"flywheel-cycles\">—</span>", "GET /api/flywheel", true)}
+          ${metric("Agents", "<span id=\"ov-agents\">—</span>", "GET /api/agents")}
+          ${metric("Revenue", "—", "No live billing analytics")}
+          ${metric("Views / CTR / RPM", "—", "Engine telemetry only")}
         </div>
         <p class="muted" id="agent-feed" style="margin-top:0.75rem">Loading /api/agents/overview…</p>
         <div class="grid split" style="margin-top:0.75rem">
           <section class="card">
-            <h2 class="section-h" style="margin:0 0 0.85rem">AI activity</h2>
-            <div class="feed">${activity.map(([who, what, t]) => `<div class="feed-item"><time>${t}</time><strong>${who}</strong><span>${what}</span></div>`).join("")}</div>
+            <h2 class="section-h" style="margin:0 0 0.85rem">Live feed</h2>
+            <div class="feed" id="ov-feed"><p class="empty">—</p></div>
           </section>
           <section class="card">
             <h2 class="section-h" style="margin:0 0 0.85rem">Operating loop</h2>
-            <div class="loop" role="tablist">${["Discover","Create","Publish","Learn","Improve"].map((s) => `<button type="button" data-loop="${s}" class="${s===loopStep?"on":""}">${s}</button>`).join("")}</div>
-            <p class="muted" style="margin:0.9rem 0 0">Every publish updates the knowledge graph and evolution weights for the next campaign.</p>
+            <div class="loop fly-loop" id="ov-loop" role="tablist">${["Discover","Create","Publish","Learn"].map((s) => `<button type="button" data-loop="${s}" class="${s===loopStep?"on":""}">${s}</button>`).join("")}</div>
+            <p class="muted" id="flywheel-status" style="margin:0.9rem 0 0">Loading /api/flywheel…</p>
           </section>
         </div>`,
       discovery: `
         <p class="muted" id="agent-feed">Loading /api/agents/discovery…</p>
         <section class="card">
           <h2>AI opportunity scan</h2>
-          <div class="chips">${["YouTube","Reddit","TikTok","Google Trends","X","News","Competitors"].map((c,i)=>`<button type="button" class="chip${i<4?" on":""}" data-research="${c}">${c}</button>`).join("")}</div>
-          <p class="muted" id="research-status">Chip a source to POST /api/agent/research. GET health stays public without a key.</p>
+          <div class="chips" id="discovery-sources"></div>
+          <p class="muted" id="research-status">GET /api/discovery sources · chip a source to POST /api/agent/research.</p>
+          <div class="chips" id="discovery-topic-chips" style="margin-top:0.7rem"></div>
         </section>
         <div class="grid metrics" style="margin-top:0.75rem">
           ${metric("Trending", "<span id=\"disc-trending\">—</span>", "Stored nodes")}
           ${metric("Emerging", "<span id=\"disc-emerging\">—</span>", "Research source")}
           ${metric("Low Competition", "<span id=\"disc-open\">—</span>", "Whitespace")}
-          ${metric("Avg Virality", "<span id=\"disc-viral\">—</span>", "From graph", true)}
+          ${metric("Opportunities", "<span id=\"disc-viral\">—</span>", "GET /api/discovery", true)}
         </div>
         <section class="card" style="margin-top:0.75rem">
           <h2>High-opportunity topics</h2>
-          <div id="discovery-nodes"><p class="muted">Loading stored knowledge nodes…</p></div>
-        </section>`,
+          <div id="discovery-nodes"><p class="muted">Loading GET /api/discovery opportunities…</p></div>
+        </section>`
       knowledge: `
         <p class="muted" id="agent-feed">Loading /api/agents/knowledge…</p>
         <div class="grid metrics-3">
@@ -268,8 +251,11 @@
         </div>
         <section class="card" style="margin-top:0.75rem">
           <h2>Living knowledge graph</h2>
-          <div class="flow">${["Topic","Audience","Hooks","Scripts","Videos","Analytics"].map((n)=>`<span>${n}</span><i>→</i>`).join("")}<span class="end">Updated Graph</span></div>
-          <p class="muted">Every publish strengthens the graph. Hermes doesn’t store files — it stores causal media intelligence.</p>
+          <div class="kg-wrap">
+            <svg id="kg-svg" class="kg-svg" role="img" aria-label="Knowledge graph"></svg>
+            <div class="kg-tooltip" id="kg-tooltip" hidden></div>
+          </div>
+          <p class="muted" id="kg-empty">GET /api/knowledge/graph (nodes fallback if 404). Drag nodes · hover for trend.</p>
         </section>
         <section class="card" style="margin-top:0.75rem">
           <h2>Stored nodes</h2>
@@ -302,27 +288,34 @@
         ${walkPanelHtml()}`,
       orchestra: `
         <section class="card">
-          <h2>Category orchestra</h2>
+          <h2>Agent orchestra</h2>
           <p class="muted" id="agent-feed">Loading /api/agents/orchestra…</p>
           <div class="actions" style="margin-top:0.6rem">
-            <button class="btn primary" type="button" id="agents-tick">Tick all category agents</button>
+            <button class="btn primary" type="button" id="agents-tick">Tick 14 category agents</button>
           </div>
+          <div class="chips" id="orch-health-chips" style="margin-top:0.6rem">
+            <span class="chip">inference…</span>
+            <span class="chip">MPT…</span>
+          </div>
+          <p class="muted" id="tick-label" style="margin-top:0.45rem"></p>
         </section>
         <div class="grid metrics" style="margin-top:0.75rem">
           ${metric("CEO", "Hermes OS Orchestrator", "Orchestrator")}
-          ${metric("Agents", "14", "OS + kernel")}
-          ${metric("Healthy", "—%", "Runtime health")}
-          ${metric("Platform", "—", "Reliability layer")}
+          ${metric("Workforce", "<span id=\"orch-count\">—</span>", "GET /api/orchestra/pipeline")}
+          ${metric("Healthy", "<span id=\"orch-healthy\">—</span>", "LM Studio")}
+          ${metric("Jobs", "<span id=\"orch-platform\">—</span>", "GET /api/jobs")}
         </div>
-        <section class="card" style="margin-top:0.75rem"><h2>Organization</h2><p class="empty">Loading organization…</p></section>
+        <section class="card" style="margin-top:0.75rem"><h2>Workforce · 8 agents</h2><div class="orch-grid" id="orch-grid"><p class="empty">Loading GET /api/orchestra/pipeline…</p></div></section>
+        <section class="card" style="margin-top:0.75rem"><h2>Jobs</h2><div id="job-list"><p class="empty">Loading GET /api/jobs…</p></div></section>
         <section class="card" style="margin-top:0.75rem">
           <h2>Live event stream</h2>
           <div class="feed" id="event-stream"><p class="empty">Waiting for workflow events…</p></div>
           <div class="actions" style="margin-top:0.8rem">
             <button class="btn primary" type="button" id="dry-run">Run dry-run campaign</button>
             <a class="btn" href="#/debugger">AI Debugger</a>
+            <a class="btn" href="#/command">Command Center · 14 categories</a>
           </div>
-        </section>`,
+        </section>`
       debugger: `
         <section class="card">
           <h2>Debugger agent</h2>
@@ -353,43 +346,49 @@
         </section>
         ${walkPanelHtml()}
         <section class="card" style="margin-top:0.75rem">
-          <h2>Timeline</h2>
-          <p class="muted">Hook → proof → payoff. 7-scene EDC cut at 20s, or a 4-scene Hermes OS promo at 12.6s.</p>
-          <div class="flow" style="margin-top:1rem">${["Hook","Problem","Demo","Proof","CTA"].map((n)=>`<span>${n}</span><i>→</i>`).join("")}<span class="end">Export</span></div>
+          <h2>Walking timeline</h2>
+          <p class="muted">Scenes come from the walking skeleton chain — not a fake 7-scene list.</p>
+          <div class="studio-timeline" id="studio-timeline"><p class="empty">Run the walking skeleton to fill beats.</p></div>
           <div class="actions" style="margin-top:0.8rem">
             <a class="btn primary" href="#/campaigns">Plan cuts in Campaigns</a>
             <a class="btn" href="#/publishing">Publishing queue</a>
           </div>
-        </section>
-        <div class="grid split" style="margin-top:0.75rem">
-          <section class="card"><h2>Active cut</h2><p class="muted">hermes_os_promo · 1920×1080 · 30 fps</p></section>
-          <section class="card"><h2>Captions</h2><p class="muted">Burned-in, high contrast, 4-word lines.</p></section>
-        </div>`,
+        </section>`,
       evolution: `
         <p class="muted" id="agent-feed">Loading /api/agents/evolution…</p>
         <div class="grid metrics-3">
           ${metric("Flywheel cycles", "<span id=\"flywheel-cycles\">—</span>", "Completed ticks", true)}
-          ${metric("Crown", "#129", "Thumbnail B")}
-          ${metric("Lift", "+18%", "Retention after hook rewrite")}
+          ${metric("Promoted", "<span id=\"evo-done\">—</span>", "variants")}
+          ${metric("Archived", "<span id=\"evo-healed\">—</span>", "variants")}
         </div>
         <section class="card" style="margin-top:0.75rem">
           <h2>Perpetual flywheel</h2>
+          <div class="loop fly-loop" id="evo-loop">${["Discover","Create","Publish","Learn"].map((s) => `<span class="chip" data-fly="${s}">${s}</span>`).join("")}</div>
           <p class="muted" id="flywheel-status">Loading /api/flywheel…</p>
           <div class="actions" style="margin-top:0.7rem">
             <button class="btn primary" type="button" id="flywheel-start">Start flywheel</button>
             <button class="btn" type="button" id="flywheel-stop">Stop</button>
           </div>
         </section>
-        <section class="card" style="margin-top:0.75rem"><h2>Variant board</h2><p class="muted">Thumbnail B beat A on CTR. Money hooks keep winning. Losing intros are retired automatically.</p></section>`,
+        <section class="card" style="margin-top:0.75rem">
+          <h2>Evolution board</h2>
+          <p class="muted" id="evo-status">GET /api/evolution experiments · promote / archive.</p>
+          <div id="evo-list"></div>
+        </section>`
       analytics: `
         <p class="muted" id="agent-feed">Loading /api/agents/analytics…</p>
         <div class="grid metrics">
-          ${metric("Views", "2.1M", "Across channels")}
-          ${metric("CTR", "6.8%", "+11% vs baseline", true)}
-          ${metric("Retention", "54%", "+18% evolved")}
-          ${metric("RPM", "$4.20", "+9%")}
+          ${metric("Tick total", "<span id=\"an-ticks\">—</span>", "flywheel / analytics")}
+          ${metric("Campaigns", "<span id=\"an-campaigns\">—</span>", "by label")}
+          ${metric("Knowledge", "<span id=\"an-kg\">—</span>", "node count")}
+          ${metric("Research", "<span id=\"an-research\">—</span>", "live vs DRY-RUN", true)}
         </div>
-        <section class="card" style="margin-top:0.75rem"><h2>Forecast</h2><p class="muted">Channel health is Strong. Next 30 days assume the current operating loop stays on Improve.</p></section>`,
+        <section class="card" style="margin-top:0.75rem">
+          <h2 id="an-headline">Compounding</h2>
+          <div id="an-cards" class="grid metrics-3"></div>
+          <svg id="analytics-svg" class="analytics-svg" role="img" aria-label="Analytics bars"></svg>
+          <p class="muted" id="an-status">Polling GET /api/analytics ~10s while this hash is open.</p>
+        </section>`,
       memory: `
         <section class="card">
           <h2>Memory agent</h2>
@@ -397,7 +396,8 @@
         </section>
         <section class="card" style="margin-top:0.75rem">
           <h2>Learned</h2>
-          ${["Money hooks ↑23% CTR","Short first-frame motion beats stills","EDC niches compound on Shorts + TikTok"].map((x)=>`<div class="row"><h3>${x}</h3></div>`).join("")}
+          <p class="muted" id="mem-status">GET /api/memory</p>
+          <div id="mem-list"><p class="empty">Loading GET /api/memory…</p></div>
         </section>`,
       command: `
         <p class="muted" id="agent-feed">Loading /api/agents/command…</p>
@@ -526,11 +526,30 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     document.querySelectorAll("nav a").forEach((a) => {
       a.classList.toggle("active", a.getAttribute("href") === `#/${page.id}`);
     });
+    document.querySelectorAll(".os-dock a").forEach((a) => {
+      a.classList.toggle("active", a.getAttribute("data-dock") === page.id);
+    });
+    const chromeMeta = document.getElementById("os-chrome-meta");
+    if (chromeMeta) chromeMeta.textContent = `#/${page.id}`;
+    stopAnalyticsPoll();
+    if (kgSim) {
+      kgSim.stop();
+      kgSim = null;
+    }
     if (page.id === "command") loadHealth();
     if (page.id === "settings") paintApiKeyStatus();
     if (page.id === "settings" || page.id === "overview" || page.id === "evolution" || page.id === "campaigns") loadBilling();
-    if (page.id === "overview" || page.id === "evolution") loadFlywheel();
+    if (page.id === "overview" || page.id === "evolution" || page.id === "debugger") loadFlywheel();
     if (page.id === "overview" || page.id === "discovery" || page.id === "knowledge") loadKnowledge();
+    if (page.id === "overview") loadOverviewLive();
+    if (page.id === "discovery") loadDiscovery();
+    if (page.id === "knowledge") loadKnowledgeGraph();
+    if (page.id === "orchestra") { loadOrchestra(); loadJobs(); }
+    if (page.id === "evolution") loadEvolution();
+    if (page.id === "memory") loadMemory();
+    if (page.id === "debugger") loadDebuggerFeed();
+    if (page.id === "studio") paintStudioTimeline();
+    if (page.id === "analytics") startAnalyticsPoll();
     loadAgent(page.id);
     bindPage(page.id);
     bindBilling();
@@ -778,6 +797,8 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
           scenesEl.innerHTML = scenes.length
             ? scenes.map((s) => `<div class="row"><div><h3>${s.title || `Scene ${s.index}`}</h3><div class="muted">${s.visual || ""} · ${s.duration_s || 6}s</div></div></div>`).join("")
             : "";
+          try { sessionStorage.setItem("hermes-walk-scenes", JSON.stringify(scenes)); } catch { /* */ }
+          paintStudioTimeline(scenes);
         }
         if (status) status.textContent = `storyboard ${board.storyboard_id} · POST /api/v1/thumbnails…`;
         const thumbRes = await apiFetch("/api/v1/thumbnails", {
@@ -839,13 +860,23 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
       loadFlywheel();
     });
     document.getElementById("probe")?.addEventListener("click", () => runProbe());
-    document.getElementById("refresh-probe")?.addEventListener("click", () => refreshActive());
+    document.getElementById("refresh-probe")?.addEventListener("click", () => {
+      refreshActive();
+      loadDebuggerFeed();
+    });
     document.getElementById("agents-tick")?.addEventListener("click", async () => {
       const el = document.getElementById("agent-feed");
       if (el) el.textContent = "Ticking 14 category agents…";
       try {
-        await apiFetch("/api/agents/tick", { method: "POST" });
+        const tickRes = await apiFetch("/api/agents/tick", { method: "POST" });
+        const tickJson = await tickRes.json().catch(() => ({}));
+        const tickEl = document.getElementById("tick-label");
+        if (tickEl) {
+          tickEl.textContent = `POST /api/agents/tick ${tickRes.status} · ${dash(tickJson.label || (tickJson.tick && tickJson.tick.label) || tickJson.mode)}`;
+        }
         loadAgent("orchestra");
+        loadOrchestra();
+        loadJobs();
       } catch (err) {
         if (el) el.textContent = String(err);
       }
@@ -865,9 +896,10 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
           const data = await r.json();
           if (status) {
             status.textContent = r.ok
-              ? `Researched ${data.topic || topic} · ${data.trend || r.status}`
+              ? `${data.label || data.mode || r.status} · ${data.topic || topic} · ${data.trend || ""}`
               : `Research ${r.status} · ${data.detail || data.error || JSON.stringify(data)}`;
           }
+          loadDiscovery();
           loadKnowledge();
         } catch (err) {
           if (status) status.textContent = String(err);
@@ -951,6 +983,520 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     refreshActive();
   }
 
+  function paintStudioTimeline(scenes) {
+    const box = document.getElementById("studio-timeline");
+    if (!box) return;
+    let rows = scenes;
+    if (!rows) {
+      try { rows = JSON.parse(sessionStorage.getItem("hermes-walk-scenes") || "[]"); } catch { rows = []; }
+    }
+    if (!rows.length) {
+      box.innerHTML = `<p class="empty">Run the walking skeleton to fill beats.</p>`;
+      return;
+    }
+    box.innerHTML = rows.map((s, i) => `
+      <div class="studio-beat">
+        <strong>${s.title || `Scene ${s.index || i + 1}`}</strong>
+        <div class="muted">${s.duration_s || 6}s</div>
+        <div class="muted">${s.visual || ""}</div>
+      </div>`).join("");
+  }
+
+  function flyStage(fw) {
+    const label = String((fw && (fw.label || (fw.last_tick && fw.last_tick.label))) || "").toLowerCase();
+    if (label.includes("discover")) return "Discover";
+    if (label.includes("create") || label.includes("campaign") || label.includes("studio")) return "Create";
+    if (label.includes("publish")) return "Publish";
+    if (label.includes("learn") || label.includes("analy") || label.includes("evol")) return "Learn";
+    const n = Number((fw && (fw.tick_total || fw.cycle_count)) || 0);
+    return ["Discover", "Create", "Publish", "Learn"][n % 4];
+  }
+
+  function paintFlyLoop(fw) {
+    const stage = flyStage(fw);
+    document.querySelectorAll("#ov-loop [data-loop], #evo-loop [data-fly]").forEach((el) => {
+      const name = el.getAttribute("data-loop") || el.getAttribute("data-fly");
+      el.classList.toggle("on", name === stage);
+    });
+  }
+
+  async function loadOverviewLive() {
+    const feed = document.getElementById("ov-feed");
+    try {
+      const [campR, fwR, agR] = await Promise.all([
+        fetch("/api/campaigns"),
+        fetch("/api/flywheel"),
+        fetch("/api/agents"),
+      ]);
+      const camp = campR.ok ? await campR.json() : { campaigns: [], engine: {} };
+      const fw = fwR.ok ? await fwR.json() : {};
+      const ag = agR.ok ? await agR.json() : {};
+      const items = camp.campaigns || [];
+      const engine = camp.engine || {};
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = dash(v); };
+      set("ov-campaigns", items.length);
+      set("ov-engine", engine.flywheel_label || engine.pipeline);
+      set("ov-infer", engine.inference_down ? "down" : "up");
+      set("ov-agents", ag.count || (ag.categories || []).length);
+      paintFlyLoop(fw);
+      const ticks = fw.ticks || [];
+      if (feed) {
+        if (!ticks.length && !items.length) {
+          feed.innerHTML = `<p class="empty">—</p>`;
+        } else {
+          const rows = ticks.slice(-8).reverse().map((t) => {
+            const who = t.stage || t.origin || "flywheel";
+            const what = t.label || t.message || JSON.stringify(t).slice(0, 140);
+            return `<div class="feed-item"><time>${t.at || t.ts || ""}</time><strong>${who}</strong><span>${what}</span></div>`;
+          });
+          feed.innerHTML = rows.join("") || `<p class="empty">—</p>`;
+        }
+      }
+    } catch (err) {
+      if (feed) feed.innerHTML = `<p class="empty">${String(err)}</p>`;
+    }
+  }
+
+  function researchChipMode(topic) {
+    const blob = JSON.stringify(topic || {}).toLowerCase();
+    if (topic && (topic.mode === "live" || topic.label === "live")) return "live";
+    if (blob.includes("dry-run") || blob.includes("dry_run")) return "DRY-RUN";
+    return topic && (topic.mode || topic.label) || "stored";
+  }
+
+  async function loadDiscovery() {
+    const chips = document.getElementById("discovery-topic-chips");
+    const list = document.getElementById("discovery-nodes");
+    const sourcesEl = document.getElementById("discovery-sources");
+    try {
+      const r = await fetch("/api/discovery");
+      const data = r.ok ? await r.json() : { topics: [], opportunities: [], sources: [] };
+      const topics = data.topics || [];
+      const ops = data.opportunities || [];
+      const sources = data.sources || [];
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = dash(v); };
+      set("disc-trending", data.count != null ? data.count : topics.length);
+      const liveN = topics.filter((t) => researchChipMode(t) === "live").length;
+      const dryN = topics.filter((t) => researchChipMode(t) === "DRY-RUN").length;
+      set("disc-emerging", liveN);
+      set("disc-open", dryN);
+      set("disc-viral", data.opportunity_count != null ? data.opportunity_count : ops.length);
+      if (sourcesEl) {
+        sourcesEl.innerHTML = sources.length
+          ? sources.map((s, i) => `<button type="button" class="chip${s.status === "live" || i < 3 ? " on" : ""}" data-research="${s.name}">${s.name} · ${s.status || s.kind}</button>`).join("")
+          : ["YouTube","Reddit","TikTok","X","News"].map((c, i) => `<button type="button" class="chip${i<3?" on":""}" data-research="${c}">${c}</button>`).join("");
+      }
+      if (chips) {
+        chips.innerHTML = topics.length
+          ? topics.map((t) => {
+              const name = t.name || t.topic || "topic";
+              const mode = researchChipMode(t);
+              return `<button type="button" class="chip" data-research="${name}">${name} · ${mode}</button>`;
+            }).join("")
+          : `<span class="chip">No stored topics yet</span>`;
+        chips.querySelectorAll("[data-research]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const topic = btn.getAttribute("data-research");
+            const status = document.getElementById("research-status");
+            if (status) status.textContent = `POST /api/agent/research · ${topic}…`;
+            try {
+              const res = await apiFetch("/api/agent/research", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ topic }),
+              });
+              const body = await res.json();
+              if (status) status.textContent = `${body.label || body.mode || res.status} · ${body.trend || ""}`;
+              loadDiscovery();
+              loadKnowledge();
+            } catch (e) {
+              if (status) status.textContent = String(e);
+            }
+          });
+        });
+      }
+      if (list) {
+        const rows = ops.length ? ops : topics;
+        list.innerHTML = rows.length
+          ? rows.map((t, i) => {
+              const title = t.title || t.name || t.topic;
+              const meta = t.source || t.trend || researchChipMode(t);
+              const score = t.score != null ? t.score : (t.rank || i + 1);
+              return `<div class="row"><div class="min-w"><h3>${String(t.rank || i + 1).toString().padStart(2, "0")} ${title}</h3><div class="stats">${meta}</div></div><span class="pill">${score}</span></div>`;
+            }).join("")
+          : `<p class="empty">No opportunities yet. POST /api/product/bootstrap seeds the catalog.</p>`;
+      }
+    } catch (err) {
+      if (chips) chips.textContent = String(err);
+    }
+  }
+
+  function drawKnowledgeGraph(graph) {
+    const svgEl = document.getElementById("kg-svg");
+    if (!svgEl || typeof d3 === "undefined") return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+    const nodesIn = (graph.nodes || []).map((n, i) => ({
+      id: String(n.id || n.topic || n.name || i),
+      topic: n.topic || n.name || n.id || `n${i}`,
+      trend: n.trend || n.rel || "",
+    }));
+    const empty = document.getElementById("kg-empty");
+    if (!nodesIn.length) {
+      if (empty) empty.textContent = "Empty graph — POST /api/agent/research to add nodes.";
+      return;
+    }
+    if (empty) empty.textContent = `${nodesIn.length} nodes · ${(graph.links || []).length} links · drag / hover`;
+    const width = svgEl.clientWidth || 640;
+    const height = svgEl.clientHeight || 352;
+    svg.attr("viewBox", [0, 0, width, height]);
+    const idSet = new Set(nodesIn.map((n) => n.id));
+    const links = (graph.links || graph.edges || [])
+      .map((l) => ({
+        source: String(l.source || l.src || l.from),
+        target: String(l.target || l.dst || l.to),
+        rel: l.rel || l.type || "",
+      }))
+      .filter((l) => idSet.has(l.source) && idSet.has(l.target));
+    const tooltip = document.getElementById("kg-tooltip");
+    const sim = d3.forceSimulation(nodesIn)
+      .force("link", d3.forceLink(links).id((d) => d.id).distance(72))
+      .force("charge", d3.forceManyBody().strength(-180))
+      .force("center", d3.forceCenter(width / 2, height / 2));
+    kgSim = sim;
+    const link = svg.append("g").attr("stroke", "#3f3f4a").selectAll("line")
+      .data(links).join("line").attr("stroke-width", 1.2);
+    const node = svg.append("g").selectAll("circle")
+      .data(nodesIn).join("circle")
+      .attr("r", 8)
+      .attr("fill", "#5ee9a4")
+      .attr("stroke", "#0b0b10")
+      .call(d3.drag()
+        .on("start", (event, d) => {
+          if (!event.active) sim.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+        .on("end", (event, d) => {
+          if (!event.active) sim.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        }));
+    node.on("mouseenter", (event, d) => {
+      if (!tooltip) return;
+      tooltip.hidden = false;
+      tooltip.textContent = `${d.topic}: ${d.trend || "—"}`;
+      tooltip.style.left = `${event.offsetX + 12}px`;
+      tooltip.style.top = `${event.offsetY + 8}px`;
+    }).on("mouseleave", () => { if (tooltip) tooltip.hidden = true; });
+    sim.on("tick", () => {
+      link.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y)
+        .attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
+      node.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+    });
+    if (reduceMotion()) {
+      for (let i = 0; i < 80; i++) sim.tick();
+      sim.stop();
+      link.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y)
+        .attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
+      node.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+    }
+  }
+
+  async function loadKnowledgeGraph() {
+    let graph = { nodes: [], links: [] };
+    try {
+      const r = await fetch("/api/knowledge/graph");
+      if (r.ok) {
+        graph = await r.json();
+      } else if (r.status === 404) {
+        const n = await (await fetch("/api/knowledge/nodes")).json();
+        graph = { nodes: n.nodes || [], links: [] };
+      }
+    } catch {
+      try {
+        const n = await (await fetch("/api/knowledge/nodes")).json();
+        graph = { nodes: n.nodes || [], links: [] };
+      } catch { /* */ }
+    }
+    drawKnowledgeGraph(graph);
+  }
+
+  async function loadOrchestra() {
+    const grid = document.getElementById("orch-grid");
+    const chips = document.getElementById("orch-health-chips");
+    try {
+      const [agR, hR, pR] = await Promise.all([
+        fetch("/api/agents"),
+        fetch("/health"),
+        fetch("/api/orchestra/pipeline"),
+      ]);
+      const ag = agR.ok ? await agR.json() : { categories: [] };
+      const health = hR.ok ? await hR.json() : {};
+      const pipe = pR.ok ? await pR.json() : {};
+      const workforce = pipe.agents || [];
+      const cats = ag.categories || [];
+      const countEl = document.getElementById("orch-count");
+      const healthyEl = document.getElementById("orch-healthy");
+      if (countEl) countEl.textContent = dash(workforce.length || pipe.live_count || 8);
+      const inf = (health.inference || health.lm_studio || {});
+      const infUp = Boolean(inf.reachable);
+      if (healthyEl) healthyEl.textContent = infUp ? "lm_studio" : "down";
+      const mpt = health.moneyprinter || health.mpt || {};
+      if (chips) {
+        chips.innerHTML = `
+          <span class="chip ${infUp ? "on" : ""}">inference ${infUp ? "lm_studio" : "down"}</span>
+          <span class="chip">${pipe.live_count != null ? `${pipe.live_count} live` : "pipeline"}</span>
+          <span class="chip">${mpt.enabled != null || mpt.reachable != null || mpt.ok != null
+            ? `MPT ${mpt.enabled === false ? "off" : (mpt.reachable || mpt.ok ? "up" : "DRY-RUN")}`
+            : "MPT —"}</span>
+          <span class="chip">${cats.length} category nav</span>`;
+      }
+      if (grid) {
+        const rows = workforce.length ? workforce : cats;
+        grid.innerHTML = rows.length
+          ? rows.map((c) => {
+              const row = c.result || c;
+              const pct = Math.round(Number(c.progress || 0) * 100);
+              return `<article class="orch-card"><strong>${c.title || c.key || c.id}</strong><div class="muted">${dash(c.status || row.label || row.mode)}</div><div class="muted">${dash((c.message || row.summary || "").slice(0, 120))}${c.progress != null ? ` · ${pct}%` : ""}</div></article>`;
+            }).join("")
+          : `<p class="empty">No agents in snapshot.</p>`;
+      }
+    } catch (err) {
+      if (grid) grid.innerHTML = `<p class="empty">${String(err)}</p>`;
+    }
+  }
+
+  async function loadJobs() {
+    const list = document.getElementById("job-list");
+    const platEl = document.getElementById("orch-platform");
+    try {
+      const r = await fetch("/api/jobs");
+      const data = r.ok ? await r.json() : { jobs: [] };
+      const jobs = data.jobs || [];
+      if (platEl) platEl.textContent = dash(data.count != null ? data.count : jobs.length);
+      if (list) {
+        list.innerHTML = jobs.length
+          ? jobs.map((j) => `<div class="row"><div><h3>${j.kind || j.stage || j.id}</h3><div class="stats">${dash(j.status)} · ${dash(j.campaign_id)}</div></div><span class="pill">${Math.round(Number(j.progress || 0) * 100)}%</span></div>`).join("")
+          : `<p class="empty">No jobs yet.</p>`;
+      }
+    } catch (err) {
+      if (list) list.innerHTML = `<p class="empty">${String(err)}</p>`;
+    }
+  }
+
+  async function loadMemory() {
+    const list = document.getElementById("mem-list");
+    const status = document.getElementById("mem-status");
+    try {
+      const r = await fetch("/api/memory");
+      const data = r.ok ? await r.json() : { items: [] };
+      const items = data.items || [];
+      if (status) status.textContent = `GET /api/memory · ${dash(data.title || data.count)}`;
+      if (list) {
+        list.innerHTML = items.length
+          ? items.map((m) => `<div class="row"><h3>${m.insight || m.title || m.id}</h3><span class="pill">+${dash(m.lift)}%</span></div>`).join("")
+          : `<p class="empty">No learnings yet. POST /api/product/bootstrap seeds memory.</p>`;
+      }
+    } catch (err) {
+      if (list) list.innerHTML = `<p class="empty">${String(err)}</p>`;
+    }
+  }
+
+  async function loadDebuggerFeed() {
+    const debug = document.getElementById("debug-events");
+    if (!debug) return;
+    try {
+      const fw = await (await fetch("/api/flywheel")).json();
+      const ticks = fw.ticks || [];
+      if (ticks.length) {
+        debug.innerHTML = ticks.slice(-12).reverse().map((t) => {
+          const msg = t.label || t.message || "";
+          return `<div class="feed-item"><time>${t.stage || ""}</time><strong>flywheel</strong><span>${msg}</span></div>`;
+        }).join("");
+      }
+      paintFlyLoop(fw);
+    } catch { /* keep campaign poll */ }
+  }
+
+  async function loadEvolution() {
+    const list = document.getElementById("evo-list");
+    const status = document.getElementById("evo-status");
+    let data = {};
+    try {
+      const r = await fetch("/api/evolution");
+      if (r.ok) data = await r.json();
+      else if (status) status.textContent = `GET /api/evolution ${r.status}`;
+    } catch {
+      if (status) status.textContent = "GET /api/evolution unavailable";
+    }
+    const experiments = data.experiments || [];
+    const latest = data.latest || experiments[0];
+    const variants = (latest && latest.variants) || data.promoted || [];
+    const dEl = document.getElementById("evo-done");
+    const hEl = document.getElementById("evo-healed");
+    if (dEl) dEl.textContent = dash(data.winners_promoted);
+    if (hEl) hEl.textContent = dash(data.archived_count);
+    if (status) {
+      status.textContent = latest
+        ? `GET /api/evolution · ${latest.title || latest.id} · ${variants.length} variants`
+        : `GET /api/evolution · ${dash(data.count)} campaigns`;
+    }
+    if (!list) return;
+    if (variants.length) {
+      list.innerHTML = variants.map((v) => `
+        <div class="row">
+          <div><h3>${v.label || v.id}</h3><div class="stats">${dash(v.category)} · ${dash(v.state)} · ${dash(v.score)}</div></div>
+          <div class="actions">
+            <button class="btn primary" type="button" data-promote="${v.id}">Promote</button>
+            <button class="btn" type="button" data-archive="${v.id}">Archive</button>
+          </div>
+        </div>`).join("");
+      const postState = async (id, action) => {
+        if (status) status.textContent = `POST /api/evolution/variants/${id}/${action}…`;
+        try {
+          const r = await apiFetch(`/api/evolution/variants/${id}/${action}`, { method: "POST" });
+          const body = await r.json().catch(() => ({}));
+          if (status) status.textContent = r.ok ? `${action} · ${dash(body.state || body.label)}` : `${action} ${r.status}`;
+          if (r.ok) loadEvolution();
+        } catch (e) {
+          if (status) status.textContent = String(e);
+        }
+      };
+      list.querySelectorAll("[data-promote]").forEach((b) => b.addEventListener("click", () => postState(b.dataset.promote, "promote")));
+      list.querySelectorAll("[data-archive]").forEach((b) => b.addEventListener("click", () => postState(b.dataset.archive, "archive")));
+      return;
+    }
+    const rows = data.campaigns || [];
+    if (!rows.length) {
+      list.innerHTML = `<p class="empty">No experiments yet. POST /api/product/bootstrap seeds variants.</p>`;
+      return;
+    }
+    list.innerHTML = rows.map((c) => `
+      <div class="row">
+        <div><h3>${c.niche || c.id}</h3><div class="stats">${dash(c.status)} · ${dash(c.label || c.mode)}${c.crowned ? " · crowned" : ""}</div></div>
+        <div class="actions">
+          <button class="btn primary" type="button" data-crown="${c.id}">Crown</button>
+          <button class="btn" type="button" data-retire="${c.id}">Retire</button>
+        </div>
+      </div>`).join("");
+    const postFlag = async (id, path) => {
+      try {
+        const r = await apiFetch(`/api/evolution/${id}/${path}`, { method: "POST" });
+        if (status) status.textContent = `${path} ${r.status}`;
+        if (r.ok) loadEvolution();
+      } catch (e) {
+        if (status) status.textContent = String(e);
+      }
+    };
+    list.querySelectorAll("[data-crown]").forEach((b) => b.addEventListener("click", () => postFlag(b.dataset.crown, "crown")));
+    list.querySelectorAll("[data-retire]").forEach((b) => b.addEventListener("click", () => postFlag(b.dataset.retire, "retire")));
+  }
+
+  function drawAnalyticsBars(bars) {
+    const svgEl = document.getElementById("analytics-svg");
+    if (!svgEl || typeof d3 === "undefined") return;
+    const svg = d3.select(svgEl);
+    svg.selectAll("*").remove();
+    if (!bars.length) return;
+    const width = svgEl.clientWidth || 640;
+    const height = svgEl.clientHeight || 352;
+    const margin = { top: 16, right: 16, bottom: 48, left: 40 };
+    const innerW = width - margin.left - margin.right;
+    const innerH = height - margin.top - margin.bottom;
+    svg.attr("viewBox", [0, 0, width, height]);
+    const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleBand().domain(bars.map((d) => d.category)).range([0, innerW]).padding(0.2);
+    const y = d3.scaleLinear().domain([0, d3.max(bars, (d) => d.value) || 1]).nice().range([innerH, 0]);
+    g.append("g").attr("transform", `translate(0,${innerH})`).call(d3.axisBottom(x)).selectAll("text")
+      .attr("fill", "#8b8b98").attr("transform", "rotate(-20)").style("text-anchor", "end");
+    g.append("g").call(d3.axisLeft(y).ticks(4)).selectAll("text").attr("fill", "#8b8b98");
+    g.selectAll("rect").data(bars).join("rect")
+      .attr("x", (d) => x(d.category))
+      .attr("y", (d) => y(d.value))
+      .attr("width", x.bandwidth())
+      .attr("height", (d) => innerH - y(d.value))
+      .attr("fill", "#5ee9a4")
+      .attr("rx", 4);
+  }
+
+  async function loadAnalytics() {
+    const status = document.getElementById("an-status");
+    let snap = null;
+    try {
+      const r = await fetch("/api/analytics");
+      if (r.ok) snap = await r.json();
+      else if (status) status.textContent = `GET /api/analytics ${r.status} — composing engine telemetry`;
+    } catch {
+      if (status) status.textContent = "GET /api/analytics unavailable — composing engine telemetry";
+    }
+    if (!snap) {
+      try {
+        const [c, f, k] = await Promise.all([
+          fetch("/api/campaigns").then((r) => r.json()),
+          fetch("/api/flywheel").then((r) => r.json()),
+          fetch("/api/knowledge/nodes").then((r) => r.json()),
+        ]);
+        const items = c.campaigns || [];
+        const by = {};
+        items.forEach((row) => {
+          const key = row.label || row.status || "unknown";
+          by[key] = (by[key] || 0) + 1;
+        });
+        snap = {
+          tick_total: f.tick_total || f.cycle_count || 0,
+          campaigns: by,
+          knowledge_count: k.count != null ? k.count : (k.nodes || []).length,
+          research: { live: 0, dry_run: 0 },
+        };
+      } catch (err) {
+        if (status) status.textContent = String(err);
+        return;
+      }
+    }
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = dash(v); };
+    set("an-ticks", snap.tick_total);
+    const campMap = snap.campaigns_by_label || snap.campaigns || snap.campaign_counts || {};
+    const campN = typeof campMap === "number" ? campMap : Object.values(campMap).reduce((a, b) => a + Number(b || 0), 0);
+    set("an-campaigns", snap.campaign_count != null ? snap.campaign_count : campN);
+    set("an-kg", snap.knowledge_count || snap.knowledge);
+    const res = snap.research || {};
+    set("an-research", `${dash(res.live)} live / ${dash(res.dry_run)} DRY-RUN`);
+    const compounding = snap.compounding || {};
+    const cards = compounding.cards || [];
+    const headline = document.getElementById("an-headline");
+    if (headline) headline.textContent = compounding.headline || "Compounding";
+    const cardBox = document.getElementById("an-cards");
+    if (cardBox && cards.length) {
+      cardBox.innerHTML = cards.map((c) => `<article class="card"><span class="lbl">${c.label || c.metric}</span><div class="val green">${dash(c.value)}</div><div class="hint">${c.trend || ""} ${c.delta != null ? (c.delta >= 0 ? "+" : "") + c.delta : ""}</div></article>`).join("");
+    }
+    const bars = cards.length
+      ? cards.map((c) => ({ category: c.label || c.metric, value: Number(c.value) || 0 }))
+      : (Object.keys(campMap).length && typeof campMap === "object"
+        ? Object.entries(campMap).map(([category, value]) => ({ category, value: Number(value) || 0 }))
+        : [
+            { category: "ticks", value: Number(snap.tick_total) || 0 },
+            { category: "knowledge", value: Number(snap.knowledge_count) || 0 },
+            { category: "campaigns", value: Number(campN) || 0 },
+          ]);
+    drawAnalyticsBars(bars);
+    if (status) status.textContent = `GET /api/analytics · compounding ${cards.length} cards`;
+  }
+
+  function stopAnalyticsPoll() {
+    if (analyticsTimer) {
+      clearInterval(analyticsTimer);
+      analyticsTimer = 0;
+    }
+  }
+
+  function startAnalyticsPoll() {
+    stopAnalyticsPoll();
+    loadAnalytics();
+    analyticsTimer = setInterval(loadAnalytics, 10000);
+  }
+
   async function loadKnowledge() {
     try {
       const data = await (await fetch("/api/knowledge/nodes")).json();
@@ -993,12 +1539,13 @@ export OPENAI_API_KEY=$HERMES_API_KEY</pre>
     const cycles = document.querySelectorAll("#flywheel-cycles");
     try {
       const data = await (await fetch("/api/flywheel")).json();
-      const label = `${data.cycle_count || 0} cycles · ${data.running ? "running" : "stopped"}`;
-      cycles.forEach((el) => { el.textContent = String(data.cycle_count || 0); });
+      const label = `${data.tick_total || data.cycle_count || 0} ticks · ${data.running ? "running" : "stopped"}`;
+      cycles.forEach((el) => { el.textContent = String(data.tick_total || data.cycle_count || 0); });
       if (status) {
         const check = data.last_self_check || {};
-        status.textContent = `${label} · origin ${data.origin}${check.inference_down ? " · DRY-RUN (inference down)" : ""}`;
+        status.textContent = `${label} · ${data.label || data.origin || ""}${check.inference_down || data.inference_down ? " · DRY-RUN (inference down)" : ""}`;
       }
+      paintFlyLoop(data);
     } catch (err) {
       if (status) status.textContent = String(err);
     }

@@ -27,9 +27,19 @@ import db  # noqa: E402
 _TABLES = (
     "campaigns",
     "knowledge_nodes",
+    "knowledge_edges",
+    "debug_events",
+    "kv_store",
     "walking_scripts",
     "walking_storyboards",
     "walking_thumbnails",
+    "jobs",
+    "opportunities",
+    "experiments",
+    "experiment_variants",
+    "metric_points",
+    "learnings",
+    "pipeline_agents",
 )
 
 

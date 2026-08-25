@@ -549,7 +549,81 @@ pre.status {
 
 @media (prefers-reduced-motion: reduce) {
   .live-dot i, .splash.closing { animation: none; }
+  .os-dock a, .studio-beat, .card, .chip { transition: none !important; }
 }
+
+.app.os-shell.show {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: auto auto 1fr auto;
+  min-height: 100dvh;
+}
+.app.os-shell .os-chrome { grid-column: 1 / -1; }
+.app.os-shell .mobile-nav { grid-column: 1 / -1; }
+.app.os-shell .sidebar {
+  grid-row: 3;
+  height: auto;
+  max-height: none;
+  position: static;
+}
+.app.os-shell .workspace {
+  grid-row: 3;
+  padding-bottom: 1.25rem;
+}
+.app.os-shell .os-dock { grid-column: 1 / -1; }
+.live-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.75rem 0.45rem 0.2rem;
+}
+.status-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.68rem;
+  color: var(--mute);
+}
+.status-chip.ok { border-color: rgba(94, 233, 164, 0.45); color: var(--accent); }
+.status-chip.warn { border-color: rgba(251, 191, 36, 0.45); color: var(--warn); }
+.kg-wrap { position: relative; }
+.kg-svg, .analytics-svg {
+  display: block;
+  width: 100%;
+  height: 22rem;
+  background: #0b0b10;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.orch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+.orch-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  background: var(--card-2);
+}
+.orch-card strong { display: block; font-size: 0.85rem; }
+.studio-timeline {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.35rem 0;
+}
+.studio-beat {
+  flex: 1 0 6.5rem;
+  min-height: 4.2rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #17171f;
+  padding: 0.5rem;
+  font-size: 0.78rem;
+}
+.fly-loop { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 
 @media (max-width: 1100px) {
   .metrics, .metrics-3, .split { grid-template-columns: 1fr 1fr; }
@@ -568,4 +642,10 @@ pre.status {
   .sidebar.open { display: flex; }
   .mobile-nav { display: flex; justify-content: space-between; align-items: center; }
   .metrics, .metrics-3, .split { grid-template-columns: 1fr; }
+  .app.os-shell.show {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto 1fr auto;
+  }
+  .app.os-shell .sidebar { grid-row: auto; }
+  .app.os-shell .workspace { grid-row: auto; }
 }
