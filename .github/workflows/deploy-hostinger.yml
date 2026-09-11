@@ -61,6 +61,7 @@ jobs:
             services/hermes-api/requirements.billing.txt,
             services/hermes-api/requirements.postgres.txt,
             services/hermes-api/app.py,
+            services/hermes-api/inference_resolve.py,
             services/hermes-api/billing.py,
             services/hermes-api/campaigns.py,
             services/hermes-api/flywheel.py,
