@@ -43,6 +43,7 @@ from campaigns import (
     set_campaign_crowned,
     upsert_campaign,
 )
+from inference_resolve import clear_cache as clear_inference_cache, resolve_inference
 from flywheel import (
     SELF_CHECK_PATHS,
     request_start as flywheel_start,
@@ -93,29 +94,22 @@ _INFLIGHT: asyncio.Semaphore | None = None
 _FLYWHEEL_TASK: asyncio.Task[None] | None = None
 
 
+def _active_inference(*, probe: bool = True) -> dict:
+    """Resolved upstream for /v1 proxy + health (LM Studio, else OpenAI/Ollama)."""
+    return resolve_inference(probe=probe)
+
+
 def _inference_base() -> str:
-    return (
-        os.environ.get("INFERENCE_BASE_URL")
-        or os.environ.get("LM_STUDIO_BASE_URL")
-        or DEFAULT_LM_STUDIO
-    ).rstrip("/")
+    # Probed+cached so OpenAI/Ollama fallback is used when LM Studio is down.
+    return str(_active_inference(probe=True)["base_url"]).rstrip("/")
 
 
 def _inference_key() -> str:
-    return (
-        os.environ.get("INFERENCE_API_KEY")
-        or os.environ.get("LM_STUDIO_API_KEY")
-        or "lm-studio"
-    )
+    return str(_active_inference(probe=True)["api_key"])
 
 
 def _inference_backend() -> str:
-    explicit = (os.environ.get("INFERENCE_BACKEND") or "").strip().lower()
-    if explicit:
-        return explicit
-    if os.environ.get("INFERENCE_BASE_URL"):
-        return "vllm"
-    return "lm_studio"
+    return str(_active_inference(probe=True)["backend"])
 
 
 def _lm_base() -> str:
@@ -160,11 +154,8 @@ def _production_locked() -> bool:
 
 
 def _default_model() -> str:
-    return (
-        os.environ.get("INFERENCE_MODEL")
-        or os.environ.get("LM_STUDIO_MODEL")
-        or "local-model"
-    )
+    active = _active_inference(probe=True)
+    return str(active.get("model") or "local-model")
 
 
 @asynccontextmanager
@@ -340,8 +331,9 @@ def _upstream_stream(path: str, payload: dict[str, Any], timeout: float = 180):
 
 
 def _lm_health() -> dict[str, Any]:
+    """Active inference probe with OpenAI/Ollama fallback when LM Studio is down."""
     try:
-        code, body = _upstream("GET", "/models", timeout=3)
+        active = resolve_inference(probe=True, timeout=3.0)
     except Exception as exc:  # never fail /health
         return {
             "reachable": False,
@@ -350,20 +342,22 @@ def _lm_health() -> dict[str, Any]:
             "base_url_configured": _inference_base(),
             "backend": _inference_backend(),
             "error": str(exc),
+            "reason": "probe_failed",
+            "configured": {
+                "openai": bool((os.environ.get("OPENAI_API_KEY") or "").strip()),
+                "ollama": bool((os.environ.get("OLLAMA_BASE_URL") or "").strip()),
+            },
         }
-    models = []
-    if isinstance(body, dict):
-        models = [
-            item.get("id")
-            for item in (body.get("data") or [])
-            if isinstance(item, dict) and item.get("id")
-        ]
     return {
-        "reachable": code == 200,
-        "status_code": code,
-        "models": models,
-        "base_url_configured": _inference_base(),
-        "backend": _inference_backend(),
+        "reachable": bool(active.get("reachable")),
+        "status_code": active.get("status_code") or 502,
+        "models": list(active.get("models") or []),
+        "base_url_configured": active.get("base_url") or _inference_base(),
+        "backend": active.get("backend") or _inference_backend(),
+        "error": active.get("error"),
+        "reason": active.get("reason"),
+        "configured": active.get("configured") or {},
+        "attempts": active.get("attempts") or [],
     }
 
 
@@ -459,12 +453,19 @@ def health() -> dict[str, Any]:
             "reachable": lm["reachable"],
             "models": lm["models"],
             "max_inflight": _max_inflight(),
+            "reason": lm.get("reason"),
+            "configured": {
+                "openai": bool((lm.get("configured") or {}).get("openai")),
+                "ollama": bool((lm.get("configured") or {}).get("ollama")),
+                "inference_base_url": bool((lm.get("configured") or {}).get("inference_base_url")),
+            },
         },
         "lm_studio": {
-            "status": "up" if lm["reachable"] else "down",
-            "reachable": lm["reachable"],
-            "models": lm["models"],
-            "backend": lm["backend"],
+            "status": "up" if str(lm.get("backend") or "") in {"lm_studio", "vllm"} and lm["reachable"] else "down",
+            "reachable": bool(str(lm.get("backend") or "") in {"lm_studio", "vllm"} and lm["reachable"]),
+            "models": lm["models"] if str(lm.get("backend") or "") in {"lm_studio", "vllm"} else [],
+            "backend": "lm_studio",
+            "active_backend": lm.get("backend"),
         },
         "moneyprinter": moneyprinter_status(probe=True),
         "flywheel": {
@@ -608,9 +609,19 @@ def api_status() -> dict[str, Any]:
         "stripe_configured": stripe_configured(),
         "origin": public_origin(),
         "lm_studio": {
-            "status": "up" if reachable else "down",
-            "reachable": reachable,
+            "status": "up" if reachable and str(lm.get("backend") or "") in {"lm_studio", "vllm"} else "down",
+            "reachable": bool(reachable and str(lm.get("backend") or "") in {"lm_studio", "vllm"}),
             "backend": lm.get("backend"),
+            "active_backend": lm.get("backend"),
+        },
+        "inference": {
+            "backend": lm.get("backend"),
+            "reachable": reachable,
+            "reason": lm.get("reason"),
+            "configured": {
+                "openai": bool((lm.get("configured") or {}).get("openai")),
+                "ollama": bool((lm.get("configured") or {}).get("ollama")),
+            },
         },
         "moneyprinter": moneyprinter_status(probe=True),
     }

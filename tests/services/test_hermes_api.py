@@ -50,6 +50,11 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_AGENT_CONCURRENCY", "3")
     monkeypatch.delenv("LM_STUDIO_BASE_URL", raising=False)
     monkeypatch.delenv("HERMES_MAX_INFLIGHT", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
     import db as hermes_db
 
     hermes_db.reset_migrate_flag()
@@ -974,3 +979,91 @@ def test_discovery_scan_legal_and_sqlite_backup(client, monkeypatch):
 
 
 
+
+
+
+def test_openai_fallback_when_lm_studio_down(monkeypatch, tmp_path):
+    """LM Studio down + OPENAI_API_KEY set → active backend becomes openai."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("PUBLIC_DOMAIN", "localhost")
+    monkeypatch.delenv("HERMES_API_KEY", raising=False)
+    monkeypatch.delenv("HERMES_REQUIRE_AUTH", raising=False)
+    monkeypatch.setenv("INFERENCE_BASE_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("INFERENCE_BACKEND", "lm_studio")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-presence-only")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:9/openai-v1")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
+    monkeypatch.setenv("HERMES_CAMPAIGN_STORE", str(tmp_path / "campaigns.json"))
+    monkeypatch.setenv("HERMES_DB_PATH", str(tmp_path / "hermes.db"))
+    monkeypatch.setenv("HERMES_BACKUP_DIR", str(tmp_path / "backups"))
+    monkeypatch.setenv("HERMES_FLYWHEEL_STORE", str(tmp_path / "flywheel.json"))
+    monkeypatch.setenv("HERMES_AGENTS_STORE", str(tmp_path / "agents.json"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    import inference_resolve as ir
+
+    ir.clear_cache()
+
+    calls = []
+
+    def fake_probe(base_url, api_key, *, timeout=2.0):
+        calls.append(base_url)
+        if base_url.rstrip("/").endswith("openai-v1"):
+            return {
+                "reachable": True,
+                "status_code": 200,
+                "models": ["gpt-test"],
+                "base_url": base_url.rstrip("/"),
+                "error": None,
+            }
+        return {
+            "reachable": False,
+            "status_code": 502,
+            "models": [],
+            "base_url": base_url.rstrip("/"),
+            "error": "down",
+        }
+
+    monkeypatch.setattr(ir, "probe_models", fake_probe)
+    import db as hermes_db
+
+    hermes_db.reset_migrate_flag()
+    module = _load_app()
+    # Force re-import of resolve bindings used by app
+    ir.clear_cache()
+    health = TestClient(module.app).get("/health").json()
+    assert health["inference"]["reachable"] is True
+    assert health["inference"]["backend"] == "openai"
+    assert health["inference"]["configured"]["openai"] is True
+    assert health["lm_studio"]["status"] == "down"
+    assert health["flywheel"]["inference_down"] is False
+    assert any(u.endswith("openai-v1") for u in calls)
+
+
+def test_llm_not_configured_reason_when_no_fallback(monkeypatch):
+    import inference_resolve as ir
+
+    ir.clear_cache()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("INFERENCE_BASE_URL", raising=False)
+    monkeypatch.setenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("INFERENCE_BACKEND", "lm_studio")
+
+    def fake_probe(base_url, api_key, *, timeout=2.0):
+        return {
+            "reachable": False,
+            "status_code": 502,
+            "models": [],
+            "base_url": base_url.rstrip("/"),
+            "error": "down",
+        }
+
+    monkeypatch.setattr(ir, "probe_models", fake_probe)
+    active = ir.resolve_inference(probe=True, force=True)
+    assert active["reachable"] is False
+    assert active["reason"] == "llm_not_configured"
+    assert active["configured"]["openai"] is False

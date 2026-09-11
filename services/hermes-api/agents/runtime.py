@@ -8,23 +8,17 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from inference_resolve import resolve_inference
+
 DEFAULT_BASE = "http://127.0.0.1:1234/v1"
 
 
 def inference_base() -> str:
-    return (
-        os.environ.get("INFERENCE_BASE_URL")
-        or os.environ.get("LM_STUDIO_BASE_URL")
-        or DEFAULT_BASE
-    ).rstrip("/")
+    return str(resolve_inference(probe=True)["base_url"]).rstrip("/")
 
 
 def inference_key() -> str:
-    return (
-        os.environ.get("INFERENCE_API_KEY")
-        or os.environ.get("LM_STUDIO_API_KEY")
-        or "lm-studio"
-    )
+    return str(resolve_inference(probe=True)["api_key"])
 
 
 def infer_timeout() -> float:
@@ -62,35 +56,38 @@ def _request(method: str, path: str, payload: dict[str, Any] | None = None, time
 
 
 def probe_models() -> dict[str, Any]:
-    code, body = _request("GET", "/models", timeout=min(2.0, infer_timeout()))
-    models: list[str] = []
-    if isinstance(body, dict):
-        models = [
-            item.get("id")
-            for item in (body.get("data") or [])
-            if isinstance(item, dict) and item.get("id")
-        ]
+    active = resolve_inference(probe=True, timeout=min(2.0, infer_timeout()))
     return {
-        "reachable": code == 200,
-        "status_code": code,
-        "models": models,
-        "base_url": inference_base(),
-        "error": None if code == 200 else (body.get("error") if isinstance(body, dict) else str(body)),
+        "reachable": bool(active.get("reachable")),
+        "status_code": active.get("status_code") or 502,
+        "models": list(active.get("models") or []),
+        "base_url": active.get("base_url"),
+        "backend": active.get("backend"),
+        "reason": active.get("reason"),
+        "configured": active.get("configured") or {},
+        "error": None if active.get("reachable") else (active.get("error") or active.get("reason")),
     }
 
 
 def chat_complete(system_prompt: str, user_prompt: str, model: str | None = None) -> dict[str, Any]:
     probe = probe_models()
     if not probe["reachable"]:
+        reason = probe.get("reason") or "lm_studio_unreachable"
         return {
             "ok": False,
             "mode": "dry_run",
             "label": "DRY-RUN",
-            "reason": "lm_studio_unreachable",
+            "reason": reason,
             "probe": probe,
             "content": None,
         }
-    chosen = model or (probe["models"][0] if probe["models"] else os.environ.get("INFERENCE_MODEL") or "local-model")
+    backend = str(probe.get("backend") or "lm_studio")
+    chosen = model or (
+        probe["models"][0]
+        if probe["models"]
+        else resolve_inference(probe=False).get("model")
+        or "local-model"
+    )
     payload = {
         "model": chosen,
         "messages": [
@@ -118,10 +115,18 @@ def chat_complete(system_prompt: str, user_prompt: str, model: str | None = None
             "status_code": code,
             "content": None,
         }
+    mode = backend if backend in {"lm_studio", "vllm", "openai", "ollama", "openrouter"} else "lm_studio"
+    label = {
+        "lm_studio": "LM-STUDIO",
+        "vllm": "VLLM",
+        "openai": "OPENAI",
+        "ollama": "OLLAMA",
+        "openrouter": "OPENROUTER",
+    }.get(mode, mode.upper())
     return {
         "ok": True,
-        "mode": "lm_studio",
-        "label": "LM-STUDIO",
+        "mode": mode,
+        "label": label,
         "reason": None,
         "probe": probe,
         "model": chosen,
